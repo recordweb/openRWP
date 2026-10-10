@@ -18,7 +18,8 @@ networks:
     external: true
     name: tws-proxy
   poc_network:
-    driver: bridge
-
+    external: true
+    name: poc-fragestunde_poc_network
+    
 volumes:
   openrwp-blobs:
