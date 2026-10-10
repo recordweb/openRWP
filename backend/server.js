@@ -12,7 +12,6 @@ if (sha256Hex('abc') !== 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff
 }
 
 const config = loadConfig();
-if (!config.devToken) console.warn('DEV_TOKEN is not set: protected routes are closed');
 if (!config.publicBaseUrl) console.warn('PUBLIC_BASE_URL is not set: DID documents will contain relative endpoints');
 
 await initializeDatabase();

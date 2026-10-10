@@ -1,7 +1,6 @@
-import { timingSafeEqual } from 'node:crypto';
 import {
   CoreError, validateVersion, wouldCreateCycle, unreachableFrom, heads, isUuidV4, isHash, makeDid, parseDid,
-  encodeBase64, sha256Hex,
+  verifyDpopProof, encodeBase64, sha256Hex,
 } from '../core/index.js';
 import { buildDidDocument } from './didDocument.js';
 import { createTokenHandler } from './token.js';
@@ -17,12 +16,14 @@ const SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
 };
 const IMMUTABLE_PRIVATE = 'private, max-age=31536000, immutable';
+const JTI_TTL_SECONDS = 300; // longer than the accepted proof time window (2 x 60 s)
 
 class HttpError extends Error {
-  constructor(status, error, detail = '', extra = {}) {
+  constructor(status, error, detail = '', extra = {}, headers = {}) {
     super(error);
     this.status = status;
     this.body = { error, ...(detail ? { detail } : {}), ...extra };
+    this.headers = headers;
   }
 }
 
@@ -35,6 +36,16 @@ function sendJson(res, status, body, headers = {}) {
     ...headers,
   });
   res.end(payload);
+}
+
+// 401 with the challenge required by RFC 9449 section 7.1.
+function unauthorized(error, description) {
+  const params = [];
+  if (error !== 'unauthorized') {
+    params.push(`error="${error}"`, `error_description="${description.replace(/"/g, "'")}"`);
+  }
+  params.push('algs="EdDSA"');
+  return new HttpError(401, error, description, {}, { 'WWW-Authenticate': `DPoP ${params.join(', ')}` });
 }
 
 function coreToHttp(err) {
@@ -54,27 +65,48 @@ async function readBody(req, maxBytes) {
   return Buffer.concat(chunks);
 }
 
-function isAuthorized(req, devToken) {
-  if (!devToken) return false;
-  const match = /^Bearer (.+)$/.exec(req.headers.authorization ?? '');
-  if (!match) return false;
-  const a = Buffer.from(sha256Hex(match[1]), 'hex');
-  const b = Buffer.from(sha256Hex(devToken), 'hex');
-  return timingSafeEqual(a, b);
-}
-
 // Dependencies are injected: `store` (database), `blobs` (file store), `config`.
 export function createApp({ store, blobs, config }) {
   const recordUrl = (ns, rec) => `${config.publicBaseUrl}/records/${ns}/${rec}`;
   const handleToken = createTokenHandler({ store, config });
 
-  // Common checks for all /records/... routes.
+  // DPoP-bound access token (RFC 9449 section 7): "Authorization: DPoP <token>" plus a "DPoP" proof.
+  // Returns the authenticated device.
+  async function authenticate(req) {
+    const match = /^DPoP (\S+)$/.exec(req.headers.authorization ?? '');
+    if (!match) throw unauthorized('unauthorized', 'a DPoP access token is required');
+    const accessToken = match[1];
+
+    const { pathname } = new URL(req.url, 'http://localhost');
+    let proof;
+    try {
+      proof = verifyDpopProof(req.headers.dpop, {
+        method: req.method,
+        url: `${config.publicBaseUrl}${pathname}`,
+        accessToken,
+      });
+    } catch (err) {
+      if (err instanceof CoreError) throw unauthorized('invalid_dpop_proof', err.detail);
+      throw err;
+    }
+
+    // The token is bound to the Device key: the proof must be signed with that same key.
+    const device = await store.getTokenDevice(sha256Hex(accessToken));
+    if (!device || device.revokedAt || device.namespaceStatus !== 'active' || device.jkt !== proof.jkt) {
+      throw unauthorized('invalid_token', 'unknown, expired or revoked token');
+    }
+    if (!(await store.recordDpopJti(proof.jkt, proof.jti, JTI_TTL_SECONDS))) {
+      throw unauthorized('invalid_dpop_proof', 'jti already used');
+    }
+    return device;
+  }
+
+  // Common checks for all /records/... routes: authenticated, and the namespace is the device's own.
   async function authorizeRecordRoute(req, ns, rec) {
-    if (!isAuthorized(req, config.devToken)) throw new HttpError(401, 'unauthorized');
+    const device = await authenticate(req);
     if (!isUuidV4(ns)) throw new HttpError(400, 'invalid-namespace');
     if (!isUuidV4(rec)) throw new HttpError(400, 'invalid-record-id');
-    const namespace = await store.getNamespace(ns);
-    if (!namespace || namespace.status !== 'active') throw new HttpError(403, 'unknown-namespace');
+    if (device.namespace !== ns) throw new HttpError(403, 'forbidden', 'the device does not belong to this namespace');
   }
 
   async function health(res) {
@@ -111,15 +143,17 @@ export function createApp({ store, blobs, config }) {
     sendJson(res, 200, doc, { 'Content-Type': 'application/did+ld+json', 'Cache-Control': 'no-cache' });
   }
 
-  async function appendVersion(req, res, ns, rec) {
+  async function readJsonBody(req) {
     const raw = await readBody(req, config.maxBodyBytes);
-    let body;
     try {
-      body = JSON.parse(raw.toString('utf8'));
+      return JSON.parse(raw.toString('utf8'));
     } catch {
       throw new HttpError(400, 'malformed-json');
     }
+  }
 
+  async function appendVersion(req, res, ns, rec) {
+    const body = await readJsonBody(req);
     let fileBytes;
     try {
       fileBytes = validateVersion(body, { allowedStates: ['draft'] });
@@ -155,15 +189,6 @@ export function createApp({ store, blobs, config }) {
     sendJson(res, outcome === 'created' ? 201 : 200, result, location);
   }
 
-  async function readJsonBody(req) {
-    const raw = await readBody(req, config.maxBodyBytes);
-    try {
-      return JSON.parse(raw.toString('utf8'));
-    } catch {
-      throw new HttpError(400, 'malformed-json');
-    }
-  }
-
   // Binding 6.3: versions not reachable from the client's heads (metadata only) plus ALL current heads.
   async function sync(req, res, ns, rec) {
     const body = await readJsonBody(req);
@@ -191,7 +216,7 @@ export function createApp({ store, blobs, config }) {
       versions: unreachableFrom(all, body.have).map(toMeta),
       heads: heads(all).map((h) => ({ versionHash: h, state: stateOf.get(h) })),
     }, { 'Cache-Control': 'no-store' });
-  }  
+  }
 
   async function loadVersion(ns, rec, hash) {
     if (!isHash(hash)) throw new HttpError(400, 'invalid-hash', 'versionHash');
@@ -288,7 +313,7 @@ export function createApp({ store, blobs, config }) {
     try {
       await route(req, res);
     } catch (err) {
-      if (err instanceof HttpError) return sendJson(res, err.status, err.body);
+      if (err instanceof HttpError) return sendJson(res, err.status, err.body, err.headers);
       if (err instanceof URIError) return sendJson(res, 400, { error: 'malformed-url' });
       console.error('unhandled error:', err);
       sendJson(res, 500, { error: 'internal-error' });

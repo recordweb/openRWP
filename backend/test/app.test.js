@@ -10,15 +10,6 @@ test('health', async (t) => {
   assert.deepEqual(await res.json(), { status: 'ok', service: 'openrwp', db: 'ok', core: 'ok' });
 });
 
-test('protected routes need the token; without configured token they are closed', async (t) => {
-  const s = await startServer(); t.after(s.close);
-  const v = makeVersion();
-  assert.equal((await s.request(versionsPath(), { method: 'POST', body: v, token: null })).status, 401);
-  assert.equal((await s.request(versionsPath(), { method: 'POST', body: v, token: 'wrong' })).status, 401);
-  const closed = await startServer({ devToken: '' }); t.after(closed.close);
-  assert.equal((await closed.request(versionsPath(), { method: 'POST', body: v, token: 'anything' })).status, 401);
-});
-
 test('append, read, content and resolver for a root version', async (t) => {
   const s = await startServer(); t.after(s.close);
   const v = makeVersion({ content: 'sample text', format: 'application/vnd.oasis.opendocument.text' });
