@@ -7,3 +7,4 @@ export * from './src/representation.js';
 export * from './src/version.js';
 export * from './src/graph.js';
 export * from './src/keys.js';
+export * from './src/dpop.js';
