@@ -203,5 +203,45 @@ export function createStore(pool) {
       );
       return rows.length > 0 ? rows[0].version_hash : null;
     },
+
+    async getDeviceByJkt(jkt) {
+      const { rows } = await pool.query(
+        `SELECT d.id, d.namespace, d.label, d.revoked_at, n.status AS namespace_status
+           FROM openrwp.devices d
+           JOIN openrwp.namespaces n ON n.namespace = d.namespace
+          WHERE d.jkt = $1`,
+        [jkt],
+      );
+      if (rows.length === 0) return null;
+      const r = rows[0];
+      return {
+        id: Number(r.id),
+        namespace: r.namespace,
+        label: r.label,
+        revokedAt: r.revoked_at,
+        namespaceStatus: r.namespace_status,
+      };
+    },
+
+    // Returns true if the jti was new, false if it was already used (replay).
+    async recordDpopJti(jkt, jti, ttlSeconds) {
+      await pool.query('DELETE FROM openrwp.dpop_jti WHERE expires_at < NOW()');
+      const result = await pool.query(
+        `INSERT INTO openrwp.dpop_jti (jkt, jti, expires_at)
+         VALUES ($1, $2, NOW() + make_interval(secs => $3::double precision))
+         ON CONFLICT DO NOTHING`,
+        [jkt, jti, ttlSeconds],
+      );
+      return result.rowCount === 1;
+    },
+
+    async createToken(deviceId, tokenHash, ttlSeconds) {
+      await pool.query('DELETE FROM openrwp.oauth_tokens WHERE expires_at < NOW()');
+      await pool.query(
+        `INSERT INTO openrwp.oauth_tokens (token_hash, device_id, expires_at)
+         VALUES ($1, $2, NOW() + make_interval(secs => $3::double precision))`,
+        [tokenHash, deviceId, ttlSeconds],
+      );
+    },    
   };
 }

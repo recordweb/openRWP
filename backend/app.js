@@ -4,6 +4,7 @@ import {
   encodeBase64, sha256Hex,
 } from '../core/index.js';
 import { buildDidDocument } from './didDocument.js';
+import { createTokenHandler } from './token.js';
 
 // Structurally valid requests that the custodian does not accept (Binding 6.2: 422).
 const UNPROCESSABLE = new Set([
@@ -65,6 +66,7 @@ function isAuthorized(req, devToken) {
 // Dependencies are injected: `store` (database), `blobs` (file store), `config`.
 export function createApp({ store, blobs, config }) {
   const recordUrl = (ns, rec) => `${config.publicBaseUrl}/records/${ns}/${rec}`;
+  const handleToken = createTokenHandler({ store, config });
 
   // Common checks for all /records/... routes.
   async function authorizeRecordRoute(req, ns, rec) {
@@ -250,6 +252,10 @@ export function createApp({ store, blobs, config }) {
     if (seg[0] === 'did' && seg.length === 2) {
       only('GET');
       return resolveDid(res, seg[1]);
+    }
+    if (seg[0] === 'token' && seg.length === 1) {
+      only('POST');
+      return handleToken(req, res);
     }
     if (seg[0] === 'records' && seg.length === 4 && seg[3] === 'sync') {
       const [, ns, rec] = seg;

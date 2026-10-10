@@ -127,6 +127,26 @@ const migrations = [
       );
     `,
   },
+  {
+    id: '003_auth',
+    sql: `
+      CREATE TABLE openrwp.oauth_tokens (
+        token_hash TEXT PRIMARY KEY CHECK (token_hash ~ '^[0-9a-f]{64}$'),
+        device_id BIGINT NOT NULL REFERENCES openrwp.devices (id) ON DELETE CASCADE,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX oauth_tokens_expires_idx ON openrwp.oauth_tokens (expires_at);
+
+      CREATE TABLE openrwp.dpop_jti (
+        jkt TEXT NOT NULL,
+        jti TEXT NOT NULL,
+        expires_at TIMESTAMPTZ NOT NULL,
+        PRIMARY KEY (jkt, jti)
+      );
+      CREATE INDEX dpop_jti_expires_idx ON openrwp.dpop_jti (expires_at);
+    `,
+  },
 ];
 
 export async function initializeDatabase() {
