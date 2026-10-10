@@ -243,6 +243,73 @@ export function createStore(pool) {
         namespaceStatus: r.namespace_status,
       };
     },
+
+    // Active (not revoked) links of a record, oldest first.
+    async listLinks(ns, rec) {
+      const { rows } = await pool.query(
+        `SELECT link_id, modes, expires_at FROM openrwp.access_links
+          WHERE namespace = $1 AND record_id = $2 AND revoked_at IS NULL
+          ORDER BY created_at, link_id`,
+        [ns, rec],
+      );
+      return rows.map((r) => ({ id: r.link_id, modes: r.modes, expiresAt: r.expires_at }));
+    },
+
+    // Applies one settings update atomically: create new links, change expiry, revoke links.
+    async applyLinkChanges(ns, rec, { create, update, revoke }) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        if (revoke.length > 0) {
+          await client.query(
+            `UPDATE openrwp.access_links SET revoked_at = NOW()
+              WHERE namespace = $1 AND record_id = $2 AND revoked_at IS NULL
+                AND link_id = ANY($3::uuid[])`,
+            [ns, rec, revoke],
+          );
+        }
+        for (const u of update) {
+          await client.query(
+            `UPDATE openrwp.access_links SET expires_at = $4
+              WHERE namespace = $1 AND record_id = $2 AND link_id = $3 AND revoked_at IS NULL`,
+            [ns, rec, u.id, u.expiresAt],
+          );
+        }
+        for (const c of create) {
+          await client.query(
+            `INSERT INTO openrwp.access_links (token_hash, namespace, record_id, modes, expires_at, link_id)
+             VALUES ($1, $2, $3, ARRAY['read'], $4, $5)`,
+            [c.tokenHash, ns, rec, c.expiresAt, c.linkId],
+          );
+        }
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+      } finally {
+        client.release();
+      }
+    },
+
+    async getLinkByTokenHash(tokenHash) {
+      const { rows } = await pool.query(
+        `SELECT l.namespace, l.record_id, l.modes, l.expires_at, l.revoked_at, n.status AS namespace_status
+           FROM openrwp.access_links l
+           JOIN openrwp.namespaces n ON n.namespace = l.namespace
+          WHERE l.token_hash = $1`,
+        [tokenHash],
+      );
+      if (rows.length === 0) return null;
+      const r = rows[0];
+      return {
+        namespace: r.namespace,
+        recordId: r.record_id,
+        modes: r.modes,
+        expiresAt: r.expires_at,
+        revokedAt: r.revoked_at,
+        namespaceStatus: r.namespace_status,
+      };
+    },
         
     // Returns true if the jti was new, false if it was already used (replay).
     async recordDpopJti(jkt, jti, ttlSeconds) {

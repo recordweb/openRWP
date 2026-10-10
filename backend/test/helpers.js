@@ -26,6 +26,7 @@ export class FakeStore {
     this.devices = new Map();
     this.tokens = new Map();
     this.jtis = new Set();
+    this.links = [];
   }
   async ping() {}
   async getNamespace(ns) { return this.namespaces.get(ns) ?? null; }
@@ -83,6 +84,35 @@ export class FakeStore {
     this.jtis.add(k);
     return true;
   }
+  async listLinks(ns, rec) {
+    return this.links
+      .filter((l) => l.namespace === ns && l.recordId === rec && !l.revokedAt)
+      .map((l) => ({ id: l.id, modes: l.modes, expiresAt: l.expiresAt }));
+  }
+  async applyLinkChanges(ns, rec, { create, update, revoke }) {
+    for (const id of revoke) {
+      const l = this.links.find((x) => x.id === id && x.namespace === ns && x.recordId === rec);
+      if (l) l.revokedAt = new Date();
+    }
+    for (const u of update) {
+      const l = this.links.find((x) => x.id === u.id && x.namespace === ns && x.recordId === rec && !x.revokedAt);
+      if (l) l.expiresAt = u.expiresAt;
+    }
+    for (const c of create) {
+      this.links.push({
+        id: c.linkId, tokenHash: c.tokenHash, namespace: ns, recordId: rec,
+        modes: ['read'], expiresAt: c.expiresAt, revokedAt: null,
+      });
+    }
+  }
+  async getLinkByTokenHash(tokenHash) {
+    const l = this.links.find((x) => x.tokenHash === tokenHash);
+    if (!l) return null;
+    return {
+      namespace: l.namespace, recordId: l.recordId, modes: l.modes, expiresAt: l.expiresAt,
+      revokedAt: l.revokedAt, namespaceStatus: this.namespaces.get(l.namespace)?.status ?? 'unknown',
+    };
+  }
 }
 
 export function makeVersion({
@@ -121,7 +151,7 @@ export async function startServer(overrides = {}) {
     if (accessToken !== null) {
       headers.Authorization = `${scheme} ${accessToken}`;
       const dpop = proof ?? createDpopProof({
-        privateKeyPem: key ?? devicePem, method, url: `${PUBLIC}${path}`, accessToken,
+        privateKeyPem: key ?? devicePem, method, url: `${config.publicBaseUrl}${path}`, accessToken,
       });
       if (dpop !== '') headers.DPoP = dpop;
     }
@@ -134,3 +164,4 @@ export async function startServer(overrides = {}) {
 }
 
 export const versionsPath = (ns = NS, rec = REC) => `/records/${ns}/${rec}/versions`;
+export const settingsPath = (ns = NS, rec = REC) => `/records/${ns}/${rec}/settings`;

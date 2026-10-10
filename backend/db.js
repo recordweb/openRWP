@@ -147,6 +147,14 @@ const migrations = [
       CREATE INDEX dpop_jti_expires_idx ON openrwp.dpop_jti (expires_at);
     `,
   },
+  {
+    id: '004_links',
+    sql: `
+      ALTER TABLE openrwp.access_links ADD COLUMN link_id UUID NOT NULL;
+      ALTER TABLE openrwp.access_links ADD CONSTRAINT access_links_link_id_key UNIQUE (link_id);
+      CREATE INDEX access_links_record_idx ON openrwp.access_links (namespace, record_id);
+    `,
+  },
 ];
 
 export async function initializeDatabase() {

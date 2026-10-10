@@ -1,42 +1,18 @@
 import {
-  CoreError, validateVersion, wouldCreateCycle, unreachableFrom, heads, isUuidV4, isHash, makeDid, parseDid,
-  verifyDpopProof, encodeBase64, sha256Hex,
+  CoreError, validateVersion, wouldCreateCycle, isUuidV4, isHash, makeDid, parseDid,
+  verifyDpopProof, sha256Hex,
 } from '../core/index.js';
 import { buildDidDocument } from './didDocument.js';
 import { createTokenHandler } from './token.js';
+import { createVersionReader } from './versionReader.js';
+import { createLinks } from './links.js';
+import { HttpError, sendJson, readJsonBody } from './http.js';
 
 // Structurally valid requests that the custodian does not accept (Binding 6.2: 422).
 const UNPROCESSABLE = new Set([
   'content-hash-mismatch', 'version-hash-mismatch', 'cycle', 'ref-not-supported', 'invalid-state',
 ]);
-
-const SECURITY_HEADERS = {
-  'Referrer-Policy': 'no-referrer',
-  'X-Robots-Tag': 'noindex, nofollow',
-  'X-Content-Type-Options': 'nosniff',
-};
-const IMMUTABLE_PRIVATE = 'private, max-age=31536000, immutable';
 const JTI_TTL_SECONDS = 300; // longer than the accepted proof time window (2 x 60 s)
-
-class HttpError extends Error {
-  constructor(status, error, detail = '', extra = {}, headers = {}) {
-    super(error);
-    this.status = status;
-    this.body = { error, ...(detail ? { detail } : {}), ...extra };
-    this.headers = headers;
-  }
-}
-
-function sendJson(res, status, body, headers = {}) {
-  const payload = JSON.stringify(body);
-  res.writeHead(status, {
-    ...SECURITY_HEADERS,
-    'Content-Type': 'application/json',
-    'Content-Length': Buffer.byteLength(payload),
-    ...headers,
-  });
-  res.end(payload);
-}
 
 // 401 with the challenge required by RFC 9449 section 7.1.
 function unauthorized(error, description) {
@@ -53,22 +29,12 @@ function coreToHttp(err) {
   return new HttpError(UNPROCESSABLE.has(err.code) ? 422 : 400, err.code, err.detail);
 }
 
-async function readBody(req, maxBytes) {
-  if (Number(req.headers['content-length'] ?? 0) > maxBytes) throw new HttpError(413, 'payload-too-large');
-  const chunks = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += chunk.length;
-    if (size > maxBytes) throw new HttpError(413, 'payload-too-large');
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks);
-}
-
 // Dependencies are injected: `store` (database), `blobs` (file store), `config`.
 export function createApp({ store, blobs, config }) {
   const recordUrl = (ns, rec) => `${config.publicBaseUrl}/records/${ns}/${rec}`;
   const handleToken = createTokenHandler({ store, config });
+  const reader = createVersionReader({ store, blobs });
+  const links = createLinks({ store, reader, config });
 
   // DPoP-bound access token (RFC 9449 section 7): "Authorization: DPoP <token>" plus a "DPoP" proof.
   // Returns the authenticated device.
@@ -143,17 +109,8 @@ export function createApp({ store, blobs, config }) {
     sendJson(res, 200, doc, { 'Content-Type': 'application/did+ld+json', 'Cache-Control': 'no-cache' });
   }
 
-  async function readJsonBody(req) {
-    const raw = await readBody(req, config.maxBodyBytes);
-    try {
-      return JSON.parse(raw.toString('utf8'));
-    } catch {
-      throw new HttpError(400, 'malformed-json');
-    }
-  }
-
   async function appendVersion(req, res, ns, rec) {
-    const body = await readJsonBody(req);
+    const body = await readJsonBody(req, config.maxBodyBytes);
     let fileBytes;
     try {
       fileBytes = validateVersion(body, { allowedStates: ['draft'] });
@@ -163,10 +120,10 @@ export function createApp({ store, blobs, config }) {
 
     const { versionHash, parents } = body;
     const result = { did: makeDid(ns, rec), versionHash, recordEndpoint: recordUrl(ns, rec) };
-    const location = { Location: `${recordUrl(ns, rec)}/versions/${versionHash}` };
+    const headers = { Location: `${recordUrl(ns, rec)}/versions/${versionHash}`, ...links.settingsLinkHeader(ns, rec) };
 
     if (await store.getVersion(ns, rec, versionHash)) {
-      return sendJson(res, 200, result, location);
+      return sendJson(res, 200, result, headers);
     }
 
     const record = await store.getRecord(ns, rec);
@@ -186,88 +143,27 @@ export function createApp({ store, blobs, config }) {
     const stored = [];
     for (const bytes of fileBytes) stored.push(await blobs.put(bytes));
     const outcome = await store.insertVersion(ns, rec, body, stored);
-    sendJson(res, outcome === 'created' ? 201 : 200, result, location);
+    sendJson(res, outcome === 'created' ? 201 : 200, result, headers);
   }
 
-  // Binding 6.3: versions not reachable from the client's heads (metadata only) plus ALL current heads.
   async function sync(req, res, ns, rec) {
-    const body = await readJsonBody(req);
+    const body = await readJsonBody(req, config.maxBodyBytes);
     if (body === null || typeof body !== 'object' || !Array.isArray(body.have) || !body.have.every(isHash)) {
       throw new HttpError(400, 'invalid-request', 'have must be an array of version hashes');
     }
     if (!(await store.getRecord(ns, rec))) throw new HttpError(404, 'not-found');
-    const all = await store.listVersions(ns, rec);
-    const toMeta = (v) => {
-      const out = {
-        versionHash: v.versionHash,
-        state: v.state,
-        parents: v.parents,
-        createdAt: v.createdAtRaw,
-        modifiedAt: v.modifiedAtRaw,
-        representations: v.representations.map((r) => ({
-          format: r.format, contentHash: r.contentHash, primary: r.primary, ...(r.role !== null ? { role: r.role } : {}),
-        })),
-      };
-      if (v.signature) out.signature = v.signature;
-      return out;
-    };
-    const stateOf = new Map(all.map((v) => [v.versionHash, v.state]));
-    sendJson(res, 200, {
-      versions: unreachableFrom(all, body.have).map(toMeta),
-      heads: heads(all).map((h) => ({ versionHash: h, state: stateOf.get(h) })),
-    }, { 'Cache-Control': 'no-store' });
-  }
-
-  async function loadVersion(ns, rec, hash) {
-    if (!isHash(hash)) throw new HttpError(400, 'invalid-hash', 'versionHash');
-    const version = await store.getVersion(ns, rec, hash);
-    if (!version) throw new HttpError(404, 'not-found');
-    return version;
-  }
-
-  async function readVersion(res, ns, rec, hash) {
-    const version = await loadVersion(ns, rec, hash);
-    const representations = [];
-    for (const r of version.representations) {
-      const bytes = await blobs.get(r.fileHash);
-      if (!bytes) throw new HttpError(500, 'blob-missing', r.fileHash);
-      const rep = { format: r.format, content: encodeBase64(bytes), contentHash: r.contentHash, primary: r.primary };
-      if (r.role !== null) rep.role = r.role;
-      representations.push(rep);
-    }
-    const out = {
-      versionHash: version.versionHash,
-      state: version.state,
-      parents: version.parents,
-      createdAt: version.createdAtRaw,
-      modifiedAt: version.modifiedAtRaw,
-      representations,
-    };
-    if (version.signature) out.signature = version.signature;
-    sendJson(res, 200, out, { 'Cache-Control': IMMUTABLE_PRIVATE });
-  }
-
-  async function readContent(res, ns, rec, hash) {
-    const version = await loadVersion(ns, rec, hash);
-    const primary = version.representations.find((r) => r.primary);
-    const bytes = primary ? await blobs.get(primary.fileHash) : null;
-    if (!bytes) throw new HttpError(500, 'blob-missing');
-    res.writeHead(200, {
-      ...SECURITY_HEADERS,
-      'Content-Type': primary.format,
-      'Content-Length': bytes.length,
-      'Content-Disposition': 'inline',
-      'Cache-Control': IMMUTABLE_PRIVATE,
+    sendJson(res, 200, await reader.syncDocument(ns, rec, body.have), {
+      'Cache-Control': 'no-store',
+      ...links.settingsLinkHeader(ns, rec),
     });
-    res.end(bytes);
   }
 
   async function route(req, res) {
     const url = new URL(req.url, 'http://localhost');
     const seg = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
     const method = req.method;
-    const only = (allowed) => {
-      if (method !== allowed) throw new HttpError(405, 'method-not-allowed');
+    const only = (...allowed) => {
+      if (!allowed.includes(method)) throw new HttpError(405, 'method-not-allowed');
     };
 
     if (seg[0] === 'health' && seg.length === 1) {
@@ -282,11 +178,20 @@ export function createApp({ store, blobs, config }) {
       only('POST');
       return handleToken(req, res);
     }
+    if (seg[0] === 'c' && seg.length >= 2) {
+      return links.handleCapability(req, res, seg);
+    }
     if (seg[0] === 'records' && seg.length === 4 && seg[3] === 'sync') {
       const [, ns, rec] = seg;
       only('POST');
       await authorizeRecordRoute(req, ns, rec);
       return sync(req, res, ns, rec);
+    }
+    if (seg[0] === 'records' && seg.length === 4 && seg[3] === 'settings') {
+      const [, ns, rec] = seg;
+      only('GET', 'PUT');
+      await authorizeRecordRoute(req, ns, rec);
+      return method === 'GET' ? links.getSettings(res, ns, rec) : links.putSettings(req, res, ns, rec);
     }
     if (seg[0] === 'records' && seg[3] === 'versions') {
       const [, ns, rec, , hash, tail] = seg;
@@ -298,12 +203,12 @@ export function createApp({ store, blobs, config }) {
       if (seg.length === 5) {
         only('GET');
         await authorizeRecordRoute(req, ns, rec);
-        return readVersion(res, ns, rec, hash);
+        return reader.sendVersion(res, ns, rec, hash, links.settingsLinkHeader(ns, rec));
       }
       if (seg.length === 6 && tail === 'content') {
         only('GET');
         await authorizeRecordRoute(req, ns, rec);
-        return readContent(res, ns, rec, hash);
+        return reader.sendContent(res, ns, rec, hash);
       }
     }
     throw new HttpError(404, 'not-found');
