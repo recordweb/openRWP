@@ -1,0 +1,8 @@
+{
+  "name": "@openrwp/core",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "scripts": { "test": "node --test test/*.test.js" }
+}

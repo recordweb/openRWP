@@ -1,9 +1,16 @@
 FROM node:24-alpine
-WORKDIR /app
 ENV NODE_ENV=production
-COPY package.json ./
+
+# Shared core library; the tests run during the build and gate every deployment.
+WORKDIR /app/core
+COPY core/ ./
+RUN node --test test/*.test.js
+
+WORKDIR /app/backend
+COPY backend/package.json ./
 RUN npm install --omit=dev
-COPY . .
+COPY backend/ ./
+
 # Blob directory owned by the unprivileged user; a new named volume inherits this.
 RUN mkdir -p /data/blobs && chown node:node /data/blobs
 USER node

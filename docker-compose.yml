@@ -2,7 +2,9 @@ name: openrwp
 
 services:
   openrwp:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: openrwp
     restart: unless-stopped
     env_file:
@@ -20,6 +22,6 @@ networks:
   poc_network:
     external: true
     name: poc-fragestunde_poc_network
-    
+
 volumes:
   openrwp-blobs:
