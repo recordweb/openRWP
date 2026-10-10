@@ -1,13 +1,9 @@
 import { timingSafeEqual } from 'node:crypto';
 import {
-  CoreError, validateVersion, wouldCreateCycle, isUuidV4, isHash, makeDid, parseDid,
-  encodeBase64, sha256Hex,
-} from '../core/index.js';
-import { buildDidDocument } from './didDocument.js';
-import {
   CoreError, validateVersion, wouldCreateCycle, unreachableFrom, heads, isUuidV4, isHash, makeDid, parseDid,
   encodeBase64, sha256Hex,
 } from '../core/index.js';
+import { buildDidDocument } from './didDocument.js';
 
 // Structurally valid requests that the custodian does not accept (Binding 6.2: 422).
 const UNPROCESSABLE = new Set([
