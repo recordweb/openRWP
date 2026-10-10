@@ -7,6 +7,7 @@ import { createTokenHandler } from './token.js';
 import { createVersionReader } from './versionReader.js';
 import { createLinks } from './links.js';
 import { HttpError, sendJson, readJsonBody } from './http.js';
+import { createDocsHandler } from './docs.js';
 
 // Structurally valid requests that the custodian does not accept (Binding 6.2: 422).
 const UNPROCESSABLE = new Set([
@@ -35,6 +36,7 @@ export function createApp({ store, blobs, config }) {
   const handleToken = createTokenHandler({ store, config });
   const reader = createVersionReader({ store, blobs });
   const links = createLinks({ store, reader, config });
+  const docs = createDocsHandler({ config });
 
   // DPoP-bound access token (RFC 9449 section 7): "Authorization: DPoP <token>" plus a "DPoP" proof.
   // Returns the authenticated device.
@@ -177,6 +179,9 @@ export function createApp({ store, blobs, config }) {
     if (seg[0] === 'token' && seg.length === 1) {
       only('POST');
       return handleToken(req, res);
+    }
+    if (seg[0] === 'api-docs' && seg.length <= 2) {
+      return docs(req, res, seg);
     }
     if (seg[0] === 'c' && seg.length >= 2) {
       return links.handleCapability(req, res, seg);

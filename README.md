@@ -1,0 +1,129 @@
+# OpenRWP
+
+Demo implementation of the **RWP Client-Custodian Binding** (draft 0.0.1) on top of the
+[RecordWeb Protocol](https://recordweb.github.io/rwp/) (RWP 0.0.8). It is a simple demo, not production quality.
+
+The demo shows: a person saves a document (`.odt`) as a Record, sees its versions as a graph, and opens the
+document on a phone through a capability URL.
+
+| Component | Directory | Status |
+|---|---|---|
+| Custodian server with DID resolver, OAuth/DPoP token service | `backend/` | working, deployed |
+| Shared core library (hashes, canonical JSON, graph, DPoP, keys) | `core/` | working |
+| Linux client (Node.js CLI) | `client-linux/` | planned |
+| Android client (PWA, viewing only) | `client-android/` | planned |
+
+Live instance: `https://vps.recordweb.dev/openrwp` (API documentation at `/openrwp/api-docs`).
+
+## Concepts
+
+- **Namespace** (UUIDv4): one account on the custodian, like a mailbox at a mail provider. Registered by an administrator.
+- **Record**: identified by `did:rwp:<namespace>:<record-id>`. Created by its first (root) version.
+- **Version**: an immutable node in the version graph (DAG). Identified by `versionHash`, linked by `parents`.
+  Hashes are bare lowercase hex SHA-256 (no `sha256:` prefix).
+- **Representation**: one form of the content of a version. Files are sent inline as Base64 (`content`) with a `contentHash`.
+- **Device**: one installation of a client with its own Ed25519 key. Only registered devices get access tokens.
+- **Capability URL**: `https://<host>/openrwp/c/<token>`, read-only access for third parties, revocable, expires.
+
+## Repository layout
+
+```bash
+backend/ custodian server (Node.js, ES modules, PostgreSQL, no web framework)
+app.js routing, DPoP authentication
+token.js OAuth 2.0 token endpoint (client_credentials + DPoP)
+links.js settings and capability URLs
+versionReader.js shared read side (versions, content, sync)
+store.js db.js all SQL, migrations (schema "openrwp")
+blobs.js file store for the raw content
+openapi.js docs.js API documentation (Swagger UI at /api-docs)
+admin/ register-namespace.js, register-device.js, revoke-device.js
+test/ node:test suites with an in-memory store
+core/ shared library without dependencies, used by server and clients
+bin/ keygen.js, dpop.js, make-version.js (helper tools)
+docs/ project report and change list (German)
+.github/workflows/ deployment
+```
+
+## Storage
+
+Metadata, version graph, devices and settings are stored in PostgreSQL (own schema `openrwp`, tables are only
+touched by this application). The raw files are stored in a Docker volume, addressed by the SHA-256 of the file.
+When a version is retrieved the file is returned inline in `content`, so the stored form does not matter for the
+structure that RWP defines.
+
+## Authentication
+
+1. A device key pair (Ed25519) is created with `node core/bin/dpop.js keygen <file>`. The printed public key `x` is
+   registered by the administrator (`admin/register-device.js`).
+2. The device requests a token: `POST /token` with `grant_type=client_credentials` and a DPoP proof signed with the
+   Device key. The server identifies the device by the key thumbprint. Tokens are opaque, bound to the key, valid 10 minutes.
+3. Every request to a protected route carries `Authorization: DPoP <token>` and a fresh `DPoP` proof for that request
+   (method, URL, token hash, unique `jti`, time window of 60 seconds). Used proofs are rejected (replay protection).
+4. A single device can be revoked without touching the namespace.
+
+```bash
+export B=https://vps.recordweb.dev/openrwp
+AT=$(node core/bin/dpop.js token ~/.openrwp/device.pem $B/token)
+URL=$B/records/<namespace>/<record>/sync
+curl -s -X POST -H "Authorization: DPoP $AT" -H "DPoP: $(node core/bin/dpop.js proof ~/.openrwp/device.pem POST $URL $AT)"
+-H "Content-Type: application/json" -d '{"have":[]}' $URL
+```
+
+## API overview
+
+| Route | Purpose | Access |
+|---|---|---|
+| `GET /health` | health check | public |
+| `GET /did/{did}` | DID resolver (RWP 4.4) | public |
+| `POST /token` | access token | registered device |
+| `POST /records/{ns}/{rec}/versions` | append one version, creates the record | DPoP |
+| `GET /records/{ns}/{rec}/versions/{hash}` | version with inline content | DPoP |
+| `GET /records/{ns}/{rec}/versions/{hash}/content` | raw file | DPoP |
+| `POST /records/{ns}/{rec}/sync` | missing versions (metadata) and all heads | DPoP |
+| `GET/PUT /records/{ns}/{rec}/settings` | capability links | DPoP |
+| `GET /c/{token}`, `/c/{token}/versions/{hash}[/content]` | read-only access | capability URL |
+
+Details and schemas: `/openrwp/api-docs`.
+
+## Deployment
+
+A push to `main` runs `.github/workflows/deploy.yml`: it updates `/opt/openrwp` on the VPS, builds the Docker image
+and starts the container. The image build runs the test suites of `core` and `backend`; failing tests stop the
+deployment. A health check at the end of the workflow confirms the new container.
+
+One-time setup on the VPS:
+
+1. Create `/opt/openrwp` owned by the deploy user and add the repository secrets `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
+2. Copy `.env.example` to `.env` and fill in the values (the file is never committed). A changed `.env` needs
+   `docker compose up -d --force-recreate`.
+3. The container joins the Docker networks `tws-proxy` (reverse proxy) and `poc-fragestunde_poc_network` (PostgreSQL).
+4. Add the location `/openrwp/` to the Nginx configuration (`proxy_pass http://openrwp:3000/;`, `client_max_body_size 30m;`)
+   only after the container is running, otherwise Nginx cannot resolve the host name.
+
+Administration (inside the container):
+
+```bash
+docker exec openrwp node admin/register-namespace.js <namespace-uuid> "<label>" <author-public-key-multibase>
+docker exec openrwp node admin/register-device.js <namespace-uuid> "<label>" <device-public-key-x>
+docker exec openrwp node admin/revoke-device.js <device-id>
+```
+
+## Tests
+
+```bash
+cd core && npm test
+cd backend && npm test
+```
+
+## Scope of version 1 (deliberate deviations from the Binding and RWP)
+
+- Only draft versions. Finalisation (Binding 6.5), PDF/A conversion and merge versions are not implemented.
+- Representations with `ref` are rejected. Only `content` is supported.
+- Version signatures are optional and not verified (open design question).
+- Capability links: scope `record`, mode `read` only. `views` and other agents in settings are rejected.
+- Namespaces and devices are registered by an administrator. The Global Namespace Registry is not queried.
+- Only EdDSA (Ed25519) for DPoP proofs.
+- Files are handled in memory (limit 25 MB per request).
+- The Swagger UI loads its assets from a CDN.
+
+See `docs/aenderungsliste.md` for the points that should change in RWP, RWC and the Binding.
