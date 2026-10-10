@@ -10,6 +10,7 @@ WORKDIR /app/backend
 COPY backend/package.json ./
 RUN npm install --omit=dev
 COPY backend/ ./
+RUN node --test test/*.test.js
 
 # Blob directory owned by the unprivileged user; a new named volume inherits this.
 RUN mkdir -p /data/blobs && chown node:node /data/blobs
