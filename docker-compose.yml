@@ -11,11 +11,14 @@ services:
       - openrwp-blobs:/data/blobs
     networks:
       - tws-proxy
+      - poc_network
 
 networks:
   tws-proxy:
     external: true
     name: tws-proxy
+  poc_network:
+    driver: bridge
 
 volumes:
   openrwp-blobs:
