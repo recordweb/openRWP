@@ -27,6 +27,9 @@ export class FakeStore {
     const r = this.records.get(`${ns}/${rec}`);
     return r ? r.versions.map((v) => ({ versionHash: v.versionHash, parents: v.parents })) : [];
   }
+  async listVersions(ns, rec) {
+    return this.records.get(`${ns}/${rec}`)?.versions ?? [];
+  }
   async getVersion(ns, rec, hash) {
     return this.records.get(`${ns}/${rec}`)?.versions.find((v) => v.versionHash === hash) ?? null;
   }

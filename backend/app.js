@@ -4,6 +4,10 @@ import {
   encodeBase64, sha256Hex,
 } from '../core/index.js';
 import { buildDidDocument } from './didDocument.js';
+import {
+  CoreError, validateVersion, wouldCreateCycle, unreachableFrom, heads, isUuidV4, isHash, makeDid, parseDid,
+  encodeBase64, sha256Hex,
+} from '../core/index.js';
 
 // Structurally valid requests that the custodian does not accept (Binding 6.2: 422).
 const UNPROCESSABLE = new Set([
@@ -153,6 +157,44 @@ export function createApp({ store, blobs, config }) {
     sendJson(res, outcome === 'created' ? 201 : 200, result, location);
   }
 
+  async function readJsonBody(req) {
+    const raw = await readBody(req, config.maxBodyBytes);
+    try {
+      return JSON.parse(raw.toString('utf8'));
+    } catch {
+      throw new HttpError(400, 'malformed-json');
+    }
+  }
+
+  // Binding 6.3: versions not reachable from the client's heads (metadata only) plus ALL current heads.
+  async function sync(req, res, ns, rec) {
+    const body = await readJsonBody(req);
+    if (body === null || typeof body !== 'object' || !Array.isArray(body.have) || !body.have.every(isHash)) {
+      throw new HttpError(400, 'invalid-request', 'have must be an array of version hashes');
+    }
+    if (!(await store.getRecord(ns, rec))) throw new HttpError(404, 'not-found');
+    const all = await store.listVersions(ns, rec);
+    const toMeta = (v) => {
+      const out = {
+        versionHash: v.versionHash,
+        state: v.state,
+        parents: v.parents,
+        createdAt: v.createdAtRaw,
+        modifiedAt: v.modifiedAtRaw,
+        representations: v.representations.map((r) => ({
+          format: r.format, contentHash: r.contentHash, primary: r.primary, ...(r.role !== null ? { role: r.role } : {}),
+        })),
+      };
+      if (v.signature) out.signature = v.signature;
+      return out;
+    };
+    const stateOf = new Map(all.map((v) => [v.versionHash, v.state]));
+    sendJson(res, 200, {
+      versions: unreachableFrom(all, body.have).map(toMeta),
+      heads: heads(all).map((h) => ({ versionHash: h, state: stateOf.get(h) })),
+    }, { 'Cache-Control': 'no-store' });
+  }  
+
   async function loadVersion(ns, rec, hash) {
     if (!isHash(hash)) throw new HttpError(400, 'invalid-hash', 'versionHash');
     const version = await store.getVersion(ns, rec, hash);
@@ -212,6 +254,12 @@ export function createApp({ store, blobs, config }) {
     if (seg[0] === 'did' && seg.length === 2) {
       only('GET');
       return resolveDid(res, seg[1]);
+    }
+    if (seg[0] === 'records' && seg.length === 4 && seg[3] === 'sync') {
+      const [, ns, rec] = seg;
+      only('POST');
+      await authorizeRecordRoute(req, ns, rec);
+      return sync(req, res, ns, rec);
     }
     if (seg[0] === 'records' && seg[3] === 'versions') {
       const [, ns, rec, , hash, tail] = seg;

@@ -44,6 +44,52 @@ export function createStore(pool) {
       return rows.map((r) => ({ versionHash: r.version_hash, parents: r.parents }));
     },
 
+    // All versions of a record with metadata (no file content), in order of arrival.
+    async listVersions(ns, rec) {
+      const params = key(ns, rec);
+      const versions = await pool.query(
+        `SELECT version_hash, state, created_at_raw, modified_at_raw, signature
+           FROM openrwp.versions
+          WHERE namespace = $1 AND record_id = $2
+          ORDER BY received_at, version_hash`,
+        params,
+      );
+      const parents = await pool.query(
+        `SELECT version_hash, parent_hash FROM openrwp.version_parents
+          WHERE namespace = $1 AND record_id = $2
+          ORDER BY version_hash, position`,
+        params,
+      );
+      const reps = await pool.query(
+        `SELECT version_hash, format, role, is_primary, content_hash
+           FROM openrwp.representations
+          WHERE namespace = $1 AND record_id = $2
+          ORDER BY version_hash, position`,
+        params,
+      );
+      const parentsOf = new Map();
+      for (const p of parents.rows) {
+        if (!parentsOf.has(p.version_hash)) parentsOf.set(p.version_hash, []);
+        parentsOf.get(p.version_hash).push(p.parent_hash);
+      }
+      const repsOf = new Map();
+      for (const r of reps.rows) {
+        if (!repsOf.has(r.version_hash)) repsOf.set(r.version_hash, []);
+        repsOf.get(r.version_hash).push({
+          format: r.format, role: r.role, primary: r.is_primary, contentHash: r.content_hash,
+        });
+      }
+      return versions.rows.map((v) => ({
+        versionHash: v.version_hash,
+        state: v.state,
+        parents: parentsOf.get(v.version_hash) ?? [],
+        createdAtRaw: v.created_at_raw,
+        modifiedAtRaw: v.modified_at_raw,
+        signature: v.signature,
+        representations: repsOf.get(v.version_hash) ?? [],
+      }));
+    },
+    
     async getVersion(ns, rec, hash) {
       const params = [ns, rec, hash];
       const versions = await pool.query(
