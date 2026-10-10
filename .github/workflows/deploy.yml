@@ -1,0 +1,36 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            if [ ! -d /opt/openrwp/.git ]; then
+              git clone https://github.com/recordweb/openRWP.git /opt/openrwp
+            fi
+            cd /opt/openrwp
+            git fetch origin
+            git reset --hard origin/main
+            git clean -fd
+            [ -f .env ] || { echo "ERROR: /opt/openrwp/.env is missing"; exit 1; }
+            docker compose up -d --build
+            for i in $(seq 1 15); do
+              if docker compose exec -T openrwp wget -qO- http://localhost:3000/health; then
+                exit 0
+              fi
+              sleep 2
+            done
+            docker compose logs --tail=50
+            exit 1

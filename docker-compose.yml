@@ -1,0 +1,21 @@
+name: openrwp
+
+services:
+  openrwp:
+    build: ./backend
+    container_name: openrwp
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - openrwp-blobs:/data/blobs
+    networks:
+      - tws-proxy
+
+networks:
+  tws-proxy:
+    external: true
+    name: tws-proxy
+
+volumes:
+  openrwp-blobs:
