@@ -15,11 +15,18 @@ im README und im Bericht (`docs/bericht-entwicklung.md`).
 
 Der Kunde schickt drei Angaben (per Mail, nichts davon ist geheim):
 
-1. Namespace-UUID (generiert im GNR: https://vps.recordweb.dev/rw-gnr-admin/),
+1. Namespace-UUID (generiert im GNR: https://vps.recordweb.dev/rw-gnr-admin/ Resolver-Endpoint: `https://vps.recordweb.dev/openrwp/did/`),
 2. öffentlicher Autor-Schlüssel (beginnt mit `z6Mk`),
 3. öffentlicher Geräteschlüssel `x` und ein Gerätename.
 
-Ohne den späteren Client-CLI erzeugt der Kunde sie von Hand (Repo geklont, Node.js 20 oder neuer):
+Der Kunde erzeugt 2 und 3 mit dem Linux-Client (Repo geklont, Node.js 20 oder neuer):
+
+```bash
+node client-linux/bin/openrwp.js init
+```
+
+`init` legt Schlüssel, `config.json` und den Dokumentenordner an und gibt die drei Werte aus. Hat der Kunde schon
+Schlüssel und einen registrierten Namespace, ergänzt er `--namespace <uuid>`. Ohne den Client geht es von Hand:
 
 ```bash
 node -e "console.log(crypto.randomUUID())" # Namespace-UUID
@@ -33,8 +40,8 @@ Der Admin geht so vor:
 2. Den neuen Namespace öffnen. Unter "Agent" Name und Mailadresse des Kunden eintragen, "Save agent". Das legt den
    AgentRecord an; er ist ab jetzt der `controller` der DID-Dokumente und der `owner` neuer Records.
 3. Unter "Devices" Label und `x` eintragen, "Register device".
-4. Den Namespace im GNR eintragen (separat). Resolver-Adresse: `https://vps.recordweb.dev/openrwp/did/`.
-5. Dem Kunden mitteilen, dass er arbeiten kann.
+4. Dem Kunden mitteilen, dass er arbeiten kann.
+5. Der Kunde führt init erneut aus. Erwartet ist `Server check: OK`.
 
 Hinweis: Der Autor-Schlüssel eines Namespace kann nicht geändert werden (RWP 4.3). Ein falscher Eintrag erfordert
 einen neuen Namespace.

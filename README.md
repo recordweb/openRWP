@@ -10,8 +10,8 @@ document on a phone through a capability URL.
 |---|---|---|
 | Custodian server with DID resolver, OAuth/DPoP token service | `backend/` | working, deployed |
 | Shared core library (hashes, canonical JSON, graph, DPoP, keys) | `core/` | working |
-| Linux client (Node.js CLI) | `client-linux/` | planned |
-| Android client (PWA, viewing only) | `client-android/` | planned |
+| Linux client (Node.js CLI) | `client-linux/` | working, see `client-linux/README.md` |
+| Android client | `client-android/` | open (purpose and timing not decided; capability links already work in any browser) |
 
 Live instance: `https://vps.recordweb.dev/openrwp` (API documentation at `/openrwp/api-docs`).
 
@@ -29,17 +29,18 @@ Live instance: `https://vps.recordweb.dev/openrwp` (API documentation at `/openr
 
 ```bash
 backend/ custodian server (Node.js, ES modules, PostgreSQL, no web framework)
-app.js routing, DPoP authentication
-token.js OAuth 2.0 token endpoint (client_credentials + DPoP)
-links.js settings and capability URLs
-versionReader.js shared read side (versions, content, sync)
-store.js db.js all SQL, migrations (schema "openrwp")
-blobs.js file store for the raw content
-openapi.js docs.js API documentation (Swagger UI at /api-docs)
-admin/ register-namespace.js, register-device.js, revoke-device.js
-test/ node:test suites with an in-memory store
+  app.js routing, DPoP authentication
+  token.js OAuth 2.0 token endpoint (client_credentials + DPoP)
+  links.js settings and capability URLs
+  versionReader.js shared read side (versions, content, sync)
+  store.js db.js all SQL, migrations (schema "openrwp")
+  blobs.js file store for the raw content
+  openapi.js docs.js API documentation (Swagger UI at /api-docs)
+  test/ node:test suites with an in-memory store
 core/ shared library without dependencies, used by server and clients
-bin/ keygen.js, dpop.js, make-version.js (helper tools)
+  bin/ keygen.js, dpop.js, make-version.js (helper tools)
+client-linux/ Linux client (Node.js CLI, no dependencies)
+  bin/openrwp.js lib/ test/ testlib/
 docs/ project report and change list (German)
 .github/workflows/ deployment
 ```
@@ -114,11 +115,25 @@ unset PASSWORD
 Twenty failed logins within ten minutes lock the admin area for ten minutes.
 
 
+## Linux client
+
+The CLI in `client-linux/` saves documents from one folder as Records, shows the version graph and creates
+capability links. Details are in [client-linux/README.md](client-linux/README.md).
+
+```bash
+node client-linux/bin/openrwp.js init                 # keys, config, folder, access check
+node client-linux/bin/openrwp.js push report.odt      # new version
+node client-linux/bin/openrwp.js graph report.odt     # version graph
+node client-linux/bin/openrwp.js settings report.odt --create --days 3
+```
+
+
 ## Tests
 
 ```bash
 cd core && npm test
 cd backend && npm test
+cd client-linux && npm test  # Not in docker-build, must be run manually
 ```
 
 ## Scope of version 1 (deliberate deviations from the Binding and RWP)
@@ -131,5 +146,11 @@ cd backend && npm test
 - Only EdDSA (Ed25519) for DPoP proofs.
 - Files are handled in memory (limit 25 MB per request).
 - The Swagger UI loads its assets from a CDN.
+- Linux client: flat document folder (`<Documents>/openRWP`), one file is one Record (the file name is the key),
+  one head only (a second head stops `push` and `pull`), `createdAt` equals `modifiedAt`, requests are limited to
+  25 MB and checked before sending.
+- No SchemaRecord and no `service` entries in the DID documents (RWP CfC8, pull request 36). `recordType` stays a
+  placeholder DID.
+- The Android client is open. Capability links can be opened in any browser.
 
 See `docs/aenderungsliste.md` for the points that should change in RWP, RWC and the Binding.

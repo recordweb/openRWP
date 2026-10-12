@@ -42,6 +42,7 @@ Status: **E** = entschieden, **O** = offen (Diskussion nötig), **I** = im Demo 
 | A32 | 5.1 / 7.3 | Die Bedeutung von createdAt und modifiedAt bei Dateien ist nicht festgelegt (Zeitpunkt der Version oder der letzten Dateiänderung) | Semantik definieren. Demo: beide gleich dem Push-Zeitpunkt, Handhabe später | O, I |
 | A33 | PR 36 (Service Entries, Capability Declaration) | Der Typname heisst in der Tabelle RWPFunctionRegistry, im Abschnitt zu den capabilities aber RWP-FunctionRegistry | Einen Namen festlegen und überall verwenden | O |
 | A34 | PR 36 (RWPPublicRecordAccess) / Binding 6.6 | Der Typ beschreibt einen Endpunkt für eine eingeschränkte oder öffentliche Sicht. Eine Capability-URL ist ein Geheimnis und darf nicht im DID-Dokument stehen. Im Demo gibt sie Lesezugriff auf den ganzen Record (Scope record), Sichten sind nicht umgesetzt (C19) | Festlegen, wie zugangsbeschränkte Sichten deklariert werden, ohne ein Geheimnis im DID-Dokument offenzulegen | O  |
+| A35 | 5.5 | Nicht festgehalten, wie ein älterer Stand wiederhergestellt wird. Der Versionsgraph wird nur vorwärts geschrieben, eine Version wird nie geändert oder entfernt | Festhalten: Das Wiederherstellen erzeugt eine neue Version mit dem Inhalt der älteren Version, ihr Elternteil ist der aktuelle Head | E, I |
 
 ## B. RWC 0.0.8
 
@@ -86,6 +87,7 @@ Weitere Punkte zum RWC sind bisher nicht aufgefallen, weil der Schwerpunkt bei R
 | C27 | 5.2, 10.2 | Anmeldung eines Geräts: Im Demo trägt der Admin den öffentlichen Schlüssel in der Admin-Seite ein. Vorschlag für später: Einmal-Code (Enrollment), mit dem sich ein Gerät selbst anmeldet | O |
 | C28 | 4 | `GET {recordEndpoint}` liefert alle Versionen mit Inhalt; bei grossen Records ist die Antwort gross. Optional einen Modus ohne Inhalt vorsehen | O |
 | C29 | 6.2 | Das Binding nennt kein Grössenlimit pro Anfrage. Base64 vergrössert eine Datei um ein Drittel | Limit und Verhalten festlegen. Demo: 25 MB pro Anfrage, der Client prüft vor dem Senden, der Server antwortet mit 413 | O, I |
+| C30 | 4, 6 | Keine Operation, mit der ein Gerät die Records seines Namespace auflistet (nur die Admin-Seite zeigt die DIDs). Ein zweites Gerät findet bestehende Records nur über ihre ID. Die Zuordnung Datei zu Record liegt im Demo nur lokal (`state.json`) | Operation ergänzen, z. B. eine Liste der Record-DIDs eines Namespace, oder die Liste Teil der Geräteanmeldung machen | O |
 
 
 ## Anhang: Testvektoren (aus der Kernbibliothek, mit unabhängiger Python-Implementierung gegengeprüft)

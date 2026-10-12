@@ -1,6 +1,6 @@
 # OpenRWP: Bericht zur Entwicklung des Custodian-Servers
 
-Stand: 10. Oktober 2026. Dieser Bericht fasst zusammen, was in der Arbeitssession zum Projekt OpenRWP
+Stand: 12. Oktober 2026. Dieser Bericht fasst zusammen, was in der Arbeitssession zum Projekt OpenRWP
 (Demo-Implementierung des RWP Client-Custodian Binding) entstanden ist.
 
 ## 1. Ausgangslage und Ziel
@@ -10,8 +10,7 @@ Demo mit drei Komponenten in dieser Reihenfolge: Server (Custodian mit DID-Resol
 (PWA, nur Betrachten). Erfolgskriterium: Eine `.odt` wird auf dem Pop!_OS-Laptop als Record gespeichert, die Versionen
 sind im Graphen sichtbar, und das Dokument wird auf dem Handy über eine Capability-URL abgerufen.
 
-Stand heute: Der Server ist vollständig umgesetzt, getestet und auf dem VPS deployt. Der Linux-Client und die PWA
-stehen noch aus.
+Stand heute: Der Server ist vollständig umgesetzt, getestet und auf dem VPS deployt. Der Linux-Client ist umgesetzt (Abschnitt 11), die Android-Ansicht ist offen.
 
 ## 2. Rahmenentscheide
 
@@ -90,8 +89,8 @@ Die Umsetzung hat mehrere Lücken und Widersprüche in RWP und im Binding sichtb
 
 ## 9. Offene Punkte und nächste Schritte
 
-1. Linux-Client (`init`, `push`, `sync`, `pull`, `list/graph`, `settings`), später optional `watch`.
-2. Android-PWA zum Betrachten.
+1. Optional: `watch <ordner>` (bei jedem Speichern eine neue Version), `verify`, FUSE-Sicht.
+2. Android-Client: Zweck und Zeitpunkt offen. Capability-Links funktionieren in jedem Browser.
 3. Finalisierung und PDF/A, Signaturkonzept, Schlüsselbund, FUSE-Sicht, GNR-Abgleich beim Start.
 4. Änderungen an RWP, RWC und Binding gemäss `docs/aenderungsliste.md`.
 5. Aufräumen: Test-Links widerrufen, nicht mehr benötigte Testgeräte sperren, Zugangsdaten rotieren.
@@ -112,3 +111,65 @@ Die Umsetzung hat mehrere Lücken und Widersprüche in RWP und im Binding sichtb
 - **Swagger** unter `/openrwp/api-docs`.
 - **Tests:** `core` 37, `backend` 64. Der Docker-Build bricht bei einem roten Test ab.
 - **Offen:** Linux-CLI, Android-PWA, Enrollment-Code für Geräte (C27), Finalisierung, Signaturkonzept.
+
+## 11. Nachtrag: Linux-Client (12. Oktober 2026)
+
+Der Linux-Client (`client-linux/`, Node.js, ohne Zusatzpakete) ist umgesetzt, getestet und gegen den VPS erprobt.
+Die Kernlogik liegt in `lib/` und ist von der Kommandozeile getrennt (spätere FUSE-Sicht).
+
+### 11.1 Umsetzung in Schritten
+
+| Schritt | Inhalt | Ergebnis |
+|---|---|---|
+| 1 | Gerüst, `config.json`, `state.json`, Dateinamen | 12 Tests |
+| 2 | HTTP- und DPoP-Schicht, Token-Cache, Retry bei 401 | Fake-Server mit echter DPoP-Prüfung |
+| 3 | `init` | Schlüssel und Konfiguration übernommen, Server-Check `OK` |
+| 4 | `push`, `list`, `graph` | Testvektoren (A13) Ende zu Ende bestätigt |
+| 5 | `settings` (Capability-Links) | Link auf dem Handy geprüft, Widerruf wirkt |
+| 6 | `pull`, Wiederherstellen älterer Versionen | Version 1 in der Textverarbeitung wieder sichtbar |
+
+Tests: `core` 37, `backend` 64, `client-linux` 74.
+
+### 11.2 Entscheide
+
+| Thema | Entscheid |
+|---|---|
+| Dokumentenordner | Fest und flach: `<Dokumente>/openRWP` (XDG), keine Unterordner, versteckte Dateien ignoriert |
+| Zuordnung Datei und Record | Zentrale `~/.openrwp/state.json`, Schlüssel ist der Dateiname (Cache, der Server ist massgebend) |
+| Schlüssel bei `init` | Vorhandene Dateien werden verwendet und nie überschrieben, danach Test-Abfrage |
+| Zeitstempel | `createdAt` und `modifiedAt` sind gleich (Push-Zeitpunkt), Handhabe später (A32) |
+| Heads | Nur ein Head. `push` prüft vorher per Sync und bricht bei mehreren Heads oder einem neueren Server-Stand ab |
+| Unveränderte Datei | Keine neue Version |
+| Ältere Version | `pull --version` schreibt sie in die Datei, `push` legt danach eine neue Version auf dem Head an. Der Graph wird nur vorwärts geschrieben (A35) |
+| Lokale Änderungen | `pull` überschreibt nur mit `--force` |
+| Grössenlimit | 25 MB pro Anfrage, vor dem Senden geprüft (C29) |
+| Capability-Links | Nur über den Client, Standard 7, höchstens 30 Tage. Die URL wird nur einmal ausgegeben und nirgends gespeichert |
+| Nicht umgesetzt | `sync` und `verify` (`list` und `graph` zeigen das Nötige), SchemaRecord und `service`-Einträge (RWP CfC8, noch nicht stabil), eigene Android-Anwendung |
+
+### 11.3 Ergebnisse der Praxistests
+
+- `init` übernahm die vorhandenen Schlüssel und meldete: Gerät registriert und Namespace stimmt. Die Annahme, dass der
+  Server bei einem unbekannten Record 404 liefert und bei fremdem Namespace 403, hat sich bestätigt.
+- `push` legte den Record an, die zweite Speicherung erzeugte eine Version mit dem Vorgänger als Eltern. `list` zeigte
+  `untracked`, `in-sync` und `modified` richtig an. `graph` zeigte Root, Head und lokale Version.
+- Capability-Link: Auf dem Smartphone liessen sich Übersicht und Datei abrufen. Nach dem Widerruf lieferte der Link 404.
+- `pull --version` stellte die erste Version wieder her. Das nächste `push` legte eine dritte Version auf dem Head an.
+
+### 11.4 Stolpersteine
+
+- `node --test test/` startet jede Datei im Ordner. Hilfsdateien gehören nach `testlib/`.
+- `PUT .../settings` ersetzt die ganze Liste. Der Client muss die bestehenden Links mit ihrer `id` mitsenden und nur die
+  Felder, die das Schema erlaubt.
+- Jede Anfrage braucht einen frischen DPoP-Beweis, auch bei einer Wiederholung nach 401.
+- Die Textverarbeitung legt Sperrdateien (`.~lock.name#`) im Ordner an. Der Client ignoriert Namen mit Punkt am Anfang.
+- `pull` ersetzt die Datei unter einem geöffneten Programm. Das Dokument muss neu geladen werden.
+- Der Name des Dokumentenordners ist je nach Sprache verschieden (`Dokumente`). Der Client liest ihn aus
+  `~/.config/user-dirs.dirs`.
+
+### 11.5 Offene Punkte
+
+1. Android-Client: Zweck und Zeitpunkt offen.
+2. Die Tests des Clients laufen nicht im Docker-Build (der Client wird nicht deployt). Ob sie in die GitHub Action
+   gehören, ist offen.
+3. Optional: `watch`, `verify`, FUSE-Sicht, Enrollment-Code (C27), Finalisierung, Signaturkonzept.
+4. Neue Befunde: A32 bis A35 und C29, C30 in `docs/aenderungsliste.md`.
