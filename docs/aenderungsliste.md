@@ -3,6 +3,7 @@
 Stand: 10. Oktober 2026. Grundlage: Erfahrungen aus der Demo-Implementierung OpenRWP.
 Status: **E** = entschieden, **O** = offen (Diskussion nötig), **I** = im Demo so umgesetzt.
 
+
 ## A. RWP 0.0.8
 
 | Nr. | Kapitel | Befund | Vorschlag | Status |
@@ -27,7 +28,7 @@ Status: **E** = entschieden, **O** = offen (Diskussion nötig), **I** = im Demo 
 | A18 | 1.2 | Interne Speicherarchitektur ist ausgeklammert | Klarstellen: Massgebend ist die Struktur beim Abruf; getrennte Ablage (Datei plus Metadaten) ist zulässig | E |
 | A19 | 19.4 | Erlaubt Ed25519 oder P-256 | Für Device-Keys im Binding festlegen, welche Algorithmen gelten (Demo: nur Ed25519/EdDSA) | O |
 | A20 | 4.3 | `recordEndpoint` ist nicht definiert: Basis-URL für Operationen oder Adresse der Record-Ressource? Das Beispiel legt Letzteres nahe; ein allgemeiner Consumer (RecordFinder) ruft die Adresse direkt auf | Bedeutung festlegen und beschreiben, was `GET {recordEndpoint}` liefert (Record mit did, payload, metadata) | O |
-
+| A21 | 4.3 / 22 | Zugriff auf `recordEndpoint`: RWP trifft keine Aussage, wer den Record abrufen darf; der Resolver beziehungsweise die Implementierung entscheidet. Weitere Zugriffe sind über `serviceEndpoints` gedacht, deren Konzept noch offen ist | Festlegen oder ausdrücklich der Implementierung überlassen; serviceEndpoints konzipieren (Demo: nur authentifizierte Geräte im eigenen Namespace, anonym 401) | O, I |
 | A22 | 3.1 | Beispiel zeigt `recordHash` mit Präfix `sha256:` | Bare Hex, wie bei allen Hashes | E |
 | A23 | 6.1 | `schemaVersion` entfällt, die Version ist Teil der DID in `recordType` | Feld aus Beispiel und Tabelle streichen | E, I |
 | A24 | 4.3 / 13.1 | `controller` muss nach DID Core eine DID sein; Kapitel 13 erlaubt andere Kennungen, wo kein typisierter Eintrag verlangt ist | Vereinheitlichen (Demo: AgentRecord-DID als Controller) | O |
@@ -36,6 +37,9 @@ Status: **E** = entschieden, **O** = offen (Diskussion nötig), **I** = im Demo 
 | A27 | 5.1 / 7.2 | Die Reihenfolge von `payload` ist nicht definiert, der `recordHash` hängt aber davon ab | Regel festlegen. Demo: Eltern vor Kindern, dann `createdAt`, dann `versionHash` | O, I |
 | A28 | 9.2 | Der Text nennt Core-Typen "with DID Suffix", ohne die Suffixe aufzuführen | Suffixe ergänzen | O |
 | A29 | 4.3 | `currentVersion` heisst "Content hash der aktuellen finalisierten Version"; leer bei Entwurf. Unklar, ob `contentHash` oder `versionHash` gemeint ist. `updated` nur bei Änderung des Speicherorts | Präzisieren (Demo: leer, `updated` = `created`) | O, I |
+| A30 | 4.3 | `verificationMethod` darf nach 4.3 nicht geändert werden. Wie ein Schlüsselwechsel oder die Kompromittierung des Autor-Schlüssels abgebildet wird, ist offen | Rotation konzipieren (Demo: Schlüssel unveränderlich) | O, I |
+| A31 | 21.2.4 | Format des Resolver-Eintrags im GNR (Basis-URL mit Endung, Vorlage oder Abfrage) ist mir aus der Spec nicht belegt | Prüfen und festlegen (Demo: `https://vps.recordweb.dev/openrwp/did/`) | O |
+
 
 ## B. RWC 0.0.8
 
@@ -45,6 +49,7 @@ Status: **E** = entschieden, **O** = offen (Diskussion nötig), **I** = im Demo 
 | B2 | Rolle eines Custodian, der mehrere Namespaces für verschiedene Personen führt (Mail-Provider-Bild) | Im Konzept beschreiben, inklusive Abgrenzung zur Namespace-Hoheit der Person | O |
 
 Weitere Punkte zum RWC sind bisher nicht aufgefallen, weil der Schwerpunkt bei RWP und Binding lag.
+
 
 ## C. Binding (Draft 0.0.1)
 
@@ -63,7 +68,7 @@ Weitere Punkte zum RWC sind bisher nicht aufgefallen, weil der Schwerpunkt bei R
 | C11 | 5.1 | Token-Ausgabe konkretisieren: `grant_type=client_credentials`, das Gerät erkennt sich am DPoP-Beweis mit dem registrierten Device-Key; opake Tokens, 10 Minuten | I |
 | C12 | 5.1 | DPoP-Regeln: nur EdDSA, `ath` Pflicht bei geschützten Routen, Zeitfenster 60 s, Replay-Schutz über `jti` je Schlüssel, 401 mit `WWW-Authenticate: DPoP` | I |
 | C13 | 5.1 | Autorisierung: Ein Gerät darf nur den eigenen Namespace nutzen (403 sonst); Sperren einzelner Geräte wirkt sofort | I |
-| C14 | 5.2, 10 | Registrierung von Namespace und Gerät im Demo durch Administrator (Skripte); Open Issues 1 und 2 bleiben für die Praxis offen | O |
+| C14 | 5.2, 10 | Registrierung von Namespace, Gerät und AgentRecord im Demo durch den Administrator in der Admin-Seite (keine Skripte mehr); Open Issues 1 und 2 bleiben für die Praxis offen. | O |
 | C15 | 6.6 | `PUT /settings` ersetzt die Liste der Zugriffe; Einträge ohne `id` erzeugen einen Link, die `url` wird nur in dieser Antwort herausgegeben (Binding sagte nicht, wie die URL zum Besitzer kommt); bekannte `id` bleibt bestehen; fehlende Links werden widerrufen | E, I |
 | C16 | 6.6 | Capability-URL `{base}/c/{token}` (256 Bit, nur der Hash wird gespeichert); Standardablauf 7 Tage, höchstens 30; ungültig, abgelaufen oder widerrufen antwortet einheitlich 404; nur `GET` | I |
 | C17 | 6.6 | Capability-Routen: `/c/{token}`, `/c/{token}/versions/{hash}`, `.../content`. Es gibt keinen Abruf "aktueller Inhalt", weil der Custodian keinen Head auswählen darf | I |
@@ -75,6 +80,10 @@ Weitere Punkte zum RWC sind bisher nicht aufgefallen, weil der Schwerpunkt bei R
 | C23 | 4, 6 | `GET {recordEndpoint}` liefert den Record (`did`, `payload`, `metadata`, `recordHash`); nur mit Anmeldung, anonym 401 (ersetzt C22 im Demo) | I |
 | C24 | neu | `GET/PUT {recordEndpoint}/metadata` für den Besitzer; ein neuer Record bekommt Standardmetadaten (`recordType`, `owner` = AgentRecord-DID) | E, I |
 | C25 | 4 | DID-Dokument: `currentVersion` leer, `updated` = `created`, `controller` = AgentRecord-DID (Ersatz: Record-DID selbst) | I |
+| C26 | 9, 10.3 | Namespace-Konto und AgentRecord: Wer legt den AgentRecord an und wo liegt er? Im Demo legt die Admin-Funktion ihn im eigenen Namespace der Person an (Name, Mailadresse als JSON); `controller` und `owner` zeigen darauf. Das Binding sollte es beschreiben (Open Issue 3) | O, I |
+| C27 | 5.2, 10.2 | Anmeldung eines Geräts: Im Demo trägt der Admin den öffentlichen Schlüssel in der Admin-Seite ein. Vorschlag für später: Einmal-Code (Enrollment), mit dem sich ein Gerät selbst anmeldet | O |
+| C28 | 4 | `GET {recordEndpoint}` liefert alle Versionen mit Inhalt; bei grossen Records ist die Antwort gross. Optional einen Modus ohne Inhalt vorsehen | O |
+
 
 ## Anhang: Testvektoren (aus der Kernbibliothek, mit unabhängiger Python-Implementierung gegengeprüft)
 

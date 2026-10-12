@@ -95,3 +95,20 @@ Die Umsetzung hat mehrere Lücken und Widersprüche in RWP und im Binding sichtb
 3. Finalisierung und PDF/A, Signaturkonzept, Schlüsselbund, FUSE-Sicht, GNR-Abgleich beim Start.
 4. Änderungen an RWP, RWC und Binding gemäss `docs/aenderungsliste.md`.
 5. Aufräumen: Test-Links widerrufen, nicht mehr benötigte Testgeräte sperren, Zugangsdaten rotieren.
+
+## 10. Nachtrag (12. Oktober 2026)
+
+- **Record-Endpunkt:** `GET {recordEndpoint}` liefert den vollständigen Record (`did`, `payload`, `metadata`,
+  `recordHash`), nur mit Anmeldung (anonym 401). Reihenfolge von `payload`: Eltern vor Kindern, dann `createdAt`, dann
+  `versionHash` (Annahme, siehe A27).
+- **Metadaten:** `GET/PUT {recordEndpoint}/metadata`; ein neuer Record erhält Standardmetadaten (Platzhalter-`recordType`,
+  `owner` = AgentRecord). `schemaVersion` entfällt (in `recordType` enthalten).
+- **DID-Dokument:** `currentVersion` leer (nur Entwürfe), `updated` gleich `created`, `controller` = AgentRecord-DID
+  (Ersatz: Record-DID).
+- **AgentRecord:** Wird in der Admin-Seite im Namespace der Person angelegt (JSON mit Name und Mailadresse,
+  Entwurf, ohne Signatur). Keine Verbindung zum Hoster.
+- **Admin-Seite** unter `/openrwp/admin/` (Basic-Login, Passwort-Hash in `.env`): Namespaces, AgentRecord, Geräte,
+  DID-Liste. Die drei Skripte unter `backend/admin/` sind entfernt.
+- **Swagger** unter `/openrwp/api-docs`.
+- **Tests:** `core` 37, `backend` 64. Der Docker-Build bricht bei einem roten Test ab.
+- **Offen:** Linux-CLI, Android-PWA, Enrollment-Code für Geräte (C27), Finalisierung, Signaturkonzept.
