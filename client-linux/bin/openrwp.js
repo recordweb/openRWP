@@ -10,6 +10,7 @@ import { formatInitReport, runInit } from '../lib/init.js';
 import { formatList, listDocuments } from '../lib/list.js';
 import { pathsIn } from '../lib/paths.js';
 import { formatPush, pushFile } from '../lib/push.js';
+import { formatPull, pullFile } from '../lib/pull.js';
 import { createLink, formatCreated, formatLinks, listLinks, revokeLinks } from '../lib/settings.js';
 
 const USAGE = `Usage: openrwp <command> [options]
@@ -23,6 +24,9 @@ Commands:
   push <file>       Save the current content of a document as a new version
   list              Show the documents and their status
   graph <file>      Show the version graph of a document (--full: complete hashes)
+  pull <file>       Write the current version of a document into the folder
+                      --version <hash>     write an older version (8+ characters, see graph)
+                      --force              overwrite local changes
   settings <file>   List the capability links of a document
                       --create [--days N]  create a read link (1-30 days, default 7)
                       --revoke <id>        revoke one link (at least 4 characters of the id)
@@ -79,6 +83,19 @@ const COMMANDS = {
     const fileName = resolveDocName(context.config.docsDir, oneFile(positionals, 'graph'));
     const { entry, versions, heads } = await loadHistory({ ...context, fileName });
     console.log(renderGraph({ versions, heads, localHead: entry.head ?? undefined, full: values.full === true }));
+    return 0;
+  },
+
+  async pull(args) {
+    const { values, positionals } = parseArgs({
+      args,
+      options: { version: { type: 'string' }, force: { type: 'boolean' } },
+      allowPositionals: true,
+    });
+    const context = openContext();
+    const fileName = resolveDocName(context.config.docsDir, oneFile(positionals, 'pull'));
+    const result = await pullFile({ ...context, fileName, version: values.version, force: values.force === true });
+    console.log(formatPull(result));
     return 0;
   },
 

@@ -4,6 +4,7 @@ import { startFakeServer } from './fake-server.js';
 
 const ROUTE = /^\/records\/([^/]+)\/([^/]+)\/(versions|sync|settings)$/;
 const ENTRY_FIELDS = new Set(['id', 'agent', 'modes', 'scope', 'expires']);
+const VERSION_ROUTE = /^\/records\/([^/]+)\/([^/]+)\/versions\/([0-9a-f]{64})$/;
 const DAY_MS = 86_400_000;
 const NOT_FOUND = { status: 404, json: { error: 'not-found' } };
 
@@ -70,6 +71,11 @@ export async function startFakeCustodian(options) {
   }
 
   fake.handler = ({ method, path, json }) => {
+    const versionMatch = VERSION_ROUTE.exec(path);
+    if (versionMatch && method === 'GET') {
+      const found = fake.records.get(`${versionMatch[1]}/${versionMatch[2]}`)?.get(versionMatch[3]);
+      return found ? { json: found } : { status: 404, json: { error: 'unknown-version' } };
+    }
     const match = ROUTE.exec(path);
     if (!match) return NOT_FOUND;
     const [, namespace, recordId, operation] = match;
