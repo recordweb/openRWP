@@ -12,5 +12,8 @@ export function loadConfig(env = process.env) {
     maxBodyBytes: Number(env.MAX_BODY_MB ?? 25) * 1024 * 1024,
     recordTypeDefault: env.RECORD_TYPE_DEFAULT ?? DEFAULT_RECORD_TYPE,
     recordTypeAgent: env.RECORD_TYPE_AGENT ?? DEFAULT_AGENT_TYPE,
+    // Admin login (HTTP Basic). Without both values the admin area does not exist.
+    adminUser: env.ADMIN_USER ?? '',
+    adminPasswordHash: env.ADMIN_PASSWORD_HASH ?? '',
   };
 }

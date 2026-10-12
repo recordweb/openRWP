@@ -11,16 +11,19 @@ export function createStore(pool) {
 
     async getNamespace(ns) {
       const { rows } = await pool.query(
-        `SELECT namespace, author_public_key, status, agent_record_id
+        `SELECT namespace, label, author_public_key, status, agent_record_id, created_at
            FROM openrwp.namespaces WHERE namespace = $1`,
         [ns],
       );
       if (rows.length === 0) return null;
+      const r = rows[0];
       return {
-        namespace: rows[0].namespace,
-        authorPublicKey: rows[0].author_public_key,
-        status: rows[0].status,
-        agentRecordId: rows[0].agent_record_id,
+        namespace: r.namespace,
+        label: r.label,
+        authorPublicKey: r.author_public_key,
+        status: r.status,
+        agentRecordId: r.agent_record_id,
+        createdAt: r.created_at,
       };
     },
 
@@ -363,5 +366,116 @@ export function createStore(pool) {
         [tokenHash, deviceId, ttlSeconds],
       );
     },    
+
+
+
+    // --- Admin area ---
+
+    async listNamespaces() {
+      const { rows } = await pool.query(
+        `SELECT n.namespace, n.label, n.author_public_key, n.status, n.agent_record_id, n.created_at,
+                (SELECT COUNT(*) FROM openrwp.devices d WHERE d.namespace = n.namespace) AS devices,
+                (SELECT COUNT(*) FROM openrwp.records r WHERE r.namespace = n.namespace) AS records
+           FROM openrwp.namespaces n
+          ORDER BY n.created_at, n.namespace`,
+      );
+      return rows.map((r) => ({
+        namespace: r.namespace,
+        label: r.label,
+        authorPublicKey: r.author_public_key,
+        status: r.status,
+        agentRecordId: r.agent_record_id,
+        createdAt: r.created_at,
+        devices: Number(r.devices),
+        records: Number(r.records),
+      }));
+    },
+
+    // Returns 'created' or 'exists'.
+    async createNamespace({ namespace, label, authorPublicKey }) {
+      try {
+        await pool.query(
+          'INSERT INTO openrwp.namespaces (namespace, label, author_public_key) VALUES ($1, $2, $3)',
+          [namespace, label, authorPublicKey],
+        );
+        return 'created';
+      } catch (err) {
+        if (err.code === '23505') return 'exists';
+        throw err;
+      }
+    },
+
+    // label and status are null when unchanged. Returns the namespace or null.
+    async updateNamespace(ns, { label, status }) {
+      const { rows } = await pool.query(
+        `UPDATE openrwp.namespaces SET label = COALESCE($2, label), status = COALESCE($3, status)
+          WHERE namespace = $1
+          RETURNING namespace, label, author_public_key, status, agent_record_id, created_at`,
+        [ns, label, status],
+      );
+      if (rows.length === 0) return null;
+      const r = rows[0];
+      return {
+        namespace: r.namespace,
+        label: r.label,
+        authorPublicKey: r.author_public_key,
+        status: r.status,
+        agentRecordId: r.agent_record_id,
+        createdAt: r.created_at,
+      };
+    },
+
+    async setAgentRecordId(ns, agentRecordId) {
+      await pool.query('UPDATE openrwp.namespaces SET agent_record_id = $2 WHERE namespace = $1', [ns, agentRecordId]);
+    },
+
+    async listDevices(ns) {
+      const { rows } = await pool.query(
+        `SELECT id, label, jkt, created_at, revoked_at FROM openrwp.devices
+          WHERE namespace = $1 ORDER BY id`,
+        [ns],
+      );
+      return rows.map((r) => ({
+        id: Number(r.id), label: r.label, jkt: r.jkt, createdAt: r.created_at, revokedAt: r.revoked_at,
+      }));
+    },
+
+    // Returns the device, or 'exists' (key already registered) or 'unknown-namespace'.
+    async createDevice({ namespace, label, jwk, jkt }) {
+      try {
+        const { rows } = await pool.query(
+          `INSERT INTO openrwp.devices (namespace, public_jwk, jkt, label) VALUES ($1, $2, $3, $4)
+           RETURNING id, label, jkt, created_at, revoked_at`,
+          [namespace, jwk, jkt, label],
+        );
+        const r = rows[0];
+        return { id: Number(r.id), label: r.label, jkt: r.jkt, createdAt: r.created_at, revokedAt: r.revoked_at };
+      } catch (err) {
+        if (err.code === '23505') return 'exists';
+        if (err.code === '23503') return 'unknown-namespace';
+        throw err;
+      }
+    },
+
+    // Idempotent. Returns the device or null.
+    async revokeDevice(id) {
+      const { rows } = await pool.query(
+        `UPDATE openrwp.devices SET revoked_at = COALESCE(revoked_at, NOW()) WHERE id = $1
+          RETURNING id, label, jkt, created_at, revoked_at`,
+        [id],
+      );
+      if (rows.length === 0) return null;
+      const r = rows[0];
+      return { id: Number(r.id), label: r.label, jkt: r.jkt, createdAt: r.created_at, revokedAt: r.revoked_at };
+    },
+
+    async listRecordIds(ns, limit) {
+      const { rows } = await pool.query(
+        'SELECT record_id FROM openrwp.records WHERE namespace = $1 ORDER BY created_at, record_id LIMIT $2',
+        [ns, limit],
+      );
+      return rows.map((r) => r.record_id);
+    },
+
   };
 }

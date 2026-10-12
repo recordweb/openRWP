@@ -100,13 +100,19 @@ One-time setup on the VPS:
 4. Add the location `/openrwp/` to the Nginx configuration (`proxy_pass http://openrwp:3000/;`, `client_max_body_size 30m;`)
    only after the container is running, otherwise Nginx cannot resolve the host name.
 
-Administration (inside the container):
+Administration: the admin page at `/openrwp/admin/` (HTTP Basic login) manages namespaces (label, status),
+the AgentRecord of each namespace owner (name and email), devices (register, revoke) and lists the DIDs of the
+records. It exists only when `ADMIN_USER` and `ADMIN_PASSWORD_HASH` are set in `.env`. Create the hash on a
+machine with Node.js:
 
 ```bash
-docker exec openrwp node admin/register-namespace.js <namespace-uuid> "<label>" <author-public-key-multibase>
-docker exec openrwp node admin/register-device.js <namespace-uuid> "<label>" <device-public-key-x>
-docker exec openrwp node admin/revoke-device.js <device-id>
+read -rs PASSWORD; export PASSWORD # at least 12 characters
+node backend/tools/hash-password.js # prints the ADMIN_PASSWORD_HASH line for .env
+unset PASSWORD
 ```
+
+Twenty failed logins within ten minutes lock the admin area for ten minutes.
+
 
 ## Tests
 

@@ -8,6 +8,7 @@ import { createVersionReader } from './versionReader.js';
 import { createLinks } from './links.js';
 import { createRecords } from './records.js';
 import { createDocsHandler } from './docs.js';
+import { createAdmin } from './admin.js';
 import { HttpError, sendJson, readJsonBody } from './http.js';
 
 // Structurally valid requests that the custodian does not accept (Binding 6.2: 422).
@@ -39,6 +40,7 @@ export function createApp({ store, blobs, config }) {
   const links = createLinks({ store, reader, config });
   const records = createRecords({ store, reader, config });
   const docs = createDocsHandler({ config });
+  const admin = createAdmin({ store, blobs, config });
 
   // DPoP-bound access token (RFC 9449 section 7): "Authorization: DPoP <token>" plus a "DPoP" proof.
   // Returns the authenticated device.
@@ -185,6 +187,9 @@ export function createApp({ store, blobs, config }) {
     if (seg[0] === 'token' && seg.length === 1) {
       only('POST');
       return handleToken(req, res);
+    }
+    if (seg[0] === 'admin') {
+      return admin(req, res);
     }
     if (seg[0] === 'api-docs' && seg.length <= 2) {
       return docs(req, res, seg);

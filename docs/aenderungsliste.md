@@ -26,6 +26,16 @@ Status: **E** = entschieden, **O** = offen (Diskussion nötig), **I** = im Demo 
 | A17 | 5.5.3 | "Version ohne Eltern = Root, erste Version" | Klarstellen, ob mehrere Root-Versionen je Record erlaubt sind (Demo: zweite Root-Version wird mit 409 abgelehnt) | O, I |
 | A18 | 1.2 | Interne Speicherarchitektur ist ausgeklammert | Klarstellen: Massgebend ist die Struktur beim Abruf; getrennte Ablage (Datei plus Metadaten) ist zulässig | E |
 | A19 | 19.4 | Erlaubt Ed25519 oder P-256 | Für Device-Keys im Binding festlegen, welche Algorithmen gelten (Demo: nur Ed25519/EdDSA) | O |
+| A20 | 4.3 | `recordEndpoint` ist nicht definiert: Basis-URL für Operationen oder Adresse der Record-Ressource? Das Beispiel legt Letzteres nahe; ein allgemeiner Consumer (RecordFinder) ruft die Adresse direkt auf | Bedeutung festlegen und beschreiben, was `GET {recordEndpoint}` liefert (Record mit did, payload, metadata) | O |
+
+| A22 | 3.1 | Beispiel zeigt `recordHash` mit Präfix `sha256:` | Bare Hex, wie bei allen Hashes | E |
+| A23 | 6.1 | `schemaVersion` entfällt, die Version ist Teil der DID in `recordType` | Feld aus Beispiel und Tabelle streichen | E, I |
+| A24 | 4.3 / 13.1 | `controller` muss nach DID Core eine DID sein; Kapitel 13 erlaubt andere Kennungen, wo kein typisierter Eintrag verlangt ist | Vereinheitlichen (Demo: AgentRecord-DID als Controller) | O |
+| A25 | 6.2 | `owner` hat den Typ DID, Kapitel 13 erlaubt auch andere Schemata (z. B. Mailadresse) | Vereinheitlichen | O |
+| A26 | 13.1 | RWP definiert keinen AgentRecord-Typ; für den Betrieb braucht es einen | Typ und Schema festlegen (Demo: Platzhalter-DID) | O |
+| A27 | 5.1 / 7.2 | Die Reihenfolge von `payload` ist nicht definiert, der `recordHash` hängt aber davon ab | Regel festlegen. Demo: Eltern vor Kindern, dann `createdAt`, dann `versionHash` | O, I |
+| A28 | 9.2 | Der Text nennt Core-Typen "with DID Suffix", ohne die Suffixe aufzuführen | Suffixe ergänzen | O |
+| A29 | 4.3 | `currentVersion` heisst "Content hash der aktuellen finalisierten Version"; leer bei Entwurf. Unklar, ob `contentHash` oder `versionHash` gemeint ist. `updated` nur bei Änderung des Speicherorts | Präzisieren (Demo: leer, `updated` = `created`) | O, I |
 
 ## B. RWC 0.0.8
 
@@ -61,6 +71,10 @@ Weitere Punkte zum RWC sind bisher nicht aufgefallen, weil der Schwerpunkt bei R
 | C19 | 6.6 | Umfang Version 1: Scope `record`, Modus `read`, Agent `link`. Sichten (`views`) und weitere Modi werden mit 422 abgelehnt | I, O |
 | C20 | 6.5 | Finalisierung (`/finalize`), `ref`-Repräsentationen, Offline-Queue und Head-Limit sind nicht implementiert | I |
 | C21 | 8 | Fehlertabelle um 405, 413 und die DPoP-Challenge bei 401 erweitern | O |
+| C22 | 4, 6 | Keine Operation auf der Basis-URL `{recordEndpoint}`. `GET {recordEndpoint}` fehlt (Record-Ressource), inklusive Zugriffsregel für Consumer ohne Token. Im Demo antwortet der Server mit 404 | Operation ergänzen oder die Rolle von `recordEndpoint` klarstellen; bis dahin 401 statt 404 bei Aufruf ohne Anmeldung | O |
+| C23 | 4, 6 | `GET {recordEndpoint}` liefert den Record (`did`, `payload`, `metadata`, `recordHash`); nur mit Anmeldung, anonym 401 (ersetzt C22 im Demo) | I |
+| C24 | neu | `GET/PUT {recordEndpoint}/metadata` für den Besitzer; ein neuer Record bekommt Standardmetadaten (`recordType`, `owner` = AgentRecord-DID) | E, I |
+| C25 | 4 | DID-Dokument: `currentVersion` leer, `updated` = `created`, `controller` = AgentRecord-DID (Ersatz: Record-DID selbst) | I |
 
 ## Anhang: Testvektoren (aus der Kernbibliothek, mit unabhängiger Python-Implementierung gegengeprüft)
 
