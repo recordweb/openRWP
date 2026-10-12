@@ -33,7 +33,7 @@ test('validateConfig rejects bad values', () => {
 test('newConfig uses the default base URL and docs folder', () => {
   const cfg = newConfig({ namespace: NS, deviceLabel: 'Laptop' });
   assert.equal(cfg.baseUrl, 'https://vps.recordweb.dev/openrwp');
-  assert.ok(cfg.docsDir.endsWith('OpenRWP'));
+  assert.ok(cfg.docsDir.endsWith('openRWP'));
 });
 
 test('save and load round trip, file is owner-only', () => {
