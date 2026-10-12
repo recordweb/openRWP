@@ -10,6 +10,7 @@ import { formatInitReport, runInit } from '../lib/init.js';
 import { formatList, listDocuments } from '../lib/list.js';
 import { pathsIn } from '../lib/paths.js';
 import { formatPush, pushFile } from '../lib/push.js';
+import { createLink, formatCreated, formatLinks, listLinks, revokeLinks } from '../lib/settings.js';
 
 const USAGE = `Usage: openrwp <command> [options]
 
@@ -22,6 +23,10 @@ Commands:
   push <file>       Save the current content of a document as a new version
   list              Show the documents and their status
   graph <file>      Show the version graph of a document (--full: complete hashes)
+  settings <file>   List the capability links of a document
+                      --create [--days N]  create a read link (1-30 days, default 7)
+                      --revoke <id>        revoke one link (at least 4 characters of the id)
+                      --revoke-all         revoke all links
 `;
 
 const usage = (detail) => new ClientError('usage', detail);
@@ -74,6 +79,41 @@ const COMMANDS = {
     const fileName = resolveDocName(context.config.docsDir, oneFile(positionals, 'graph'));
     const { entry, versions, heads } = await loadHistory({ ...context, fileName });
     console.log(renderGraph({ versions, heads, localHead: entry.head ?? undefined, full: values.full === true }));
+    return 0;
+  },
+
+  async settings(args) {
+    const { values, positionals } = parseArgs({
+      args,
+      options: {
+        create: { type: 'boolean' },
+        days: { type: 'string' },
+        revoke: { type: 'string' },
+        'revoke-all': { type: 'boolean' },
+      },
+      allowPositionals: true,
+    });
+    const actions = [values.create === true, values.revoke !== undefined, values['revoke-all'] === true];
+    if (actions.filter(Boolean).length > 1) throw usage('use only one of --create, --revoke, --revoke-all');
+    if (values.days !== undefined && !values.create) throw usage('--days belongs to --create');
+
+    const context = openContext();
+    const fileName = resolveDocName(context.config.docsDir, oneFile(positionals, 'settings'));
+    const run = { ...context, fileName };
+
+    if (values.create) {
+      let days;
+      if (values.days !== undefined) days = /^\d+$/.test(values.days) ? Number(values.days) : Number.NaN;
+      console.log(formatCreated(await createLink({ ...run, days }), fileName));
+    } else if (values.revoke !== undefined) {
+      const { revoked } = await revokeLinks({ ...run, idPrefix: values.revoke });
+      console.log(`Revoked link ${revoked[0].slice(0, 8)}.`);
+    } else if (values['revoke-all']) {
+      const { revoked } = await revokeLinks({ ...run, all: true });
+      console.log(`Revoked ${revoked.length} link(s).`);
+    } else {
+      console.log(formatLinks((await listLinks(run)).links));
+    }
     return 0;
   },
 };
