@@ -1,0 +1,9 @@
+{
+  "name": "openrwp-client-linux",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "bin": { "openrwp": "bin/openrwp.js" },
+  "scripts": { "test": "node --test test/" }
+}
