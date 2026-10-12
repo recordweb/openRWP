@@ -17,13 +17,35 @@ function toMeta(v) {
   return out;
 }
 
-// Read side shared by the authenticated routes and the capability URLs.
+// Read side shared by the authenticated routes, the record endpoint and the capability URLs.
 export function createVersionReader({ store, blobs }) {
   async function load(ns, rec, hash) {
     if (!isHash(hash)) throw new HttpError(400, 'invalid-hash', 'versionHash');
     const version = await store.getVersion(ns, rec, hash);
     if (!version) throw new HttpError(404, 'not-found');
     return version;
+  }
+
+  // A stored version as the JSON object RWP defines, with the inline content of every representation.
+  async function toJson(version) {
+    const representations = [];
+    for (const r of version.representations) {
+      const bytes = await blobs.get(r.fileHash);
+      if (!bytes) throw new HttpError(500, 'blob-missing', r.fileHash);
+      const rep = { format: r.format, content: encodeBase64(bytes), contentHash: r.contentHash, primary: r.primary };
+      if (r.role !== null) rep.role = r.role;
+      representations.push(rep);
+    }
+    const out = {
+      versionHash: version.versionHash,
+      state: version.state,
+      parents: version.parents,
+      createdAt: version.createdAtRaw,
+      modifiedAt: version.modifiedAtRaw,
+      representations,
+    };
+    if (version.signature) out.signature = version.signature;
+    return out;
   }
 
   return {
@@ -38,27 +60,18 @@ export function createVersionReader({ store, blobs }) {
       };
     },
 
-    // The full version including the inline content of every representation.
+    // Every version of a record as JSON (unordered); used for the payload of the Record.
+    async allVersionsJson(ns, rec) {
+      const out = [];
+      for (const meta of await store.listVersions(ns, rec)) {
+        out.push(await toJson(await store.getVersion(ns, rec, meta.versionHash)));
+      }
+      return out;
+    },
+
     async sendVersion(res, ns, rec, hash, headers = {}) {
       const version = await load(ns, rec, hash);
-      const representations = [];
-      for (const r of version.representations) {
-        const bytes = await blobs.get(r.fileHash);
-        if (!bytes) throw new HttpError(500, 'blob-missing', r.fileHash);
-        const rep = { format: r.format, content: encodeBase64(bytes), contentHash: r.contentHash, primary: r.primary };
-        if (r.role !== null) rep.role = r.role;
-        representations.push(rep);
-      }
-      const out = {
-        versionHash: version.versionHash,
-        state: version.state,
-        parents: version.parents,
-        createdAt: version.createdAtRaw,
-        modifiedAt: version.modifiedAtRaw,
-        representations,
-      };
-      if (version.signature) out.signature = version.signature;
-      sendJson(res, 200, out, { 'Cache-Control': IMMUTABLE_PRIVATE, ...headers });
+      sendJson(res, 200, await toJson(version), { 'Cache-Control': IMMUTABLE_PRIVATE, ...headers });
     },
 
     // The raw file of the primary representation.

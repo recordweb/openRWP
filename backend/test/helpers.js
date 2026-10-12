@@ -15,14 +15,16 @@ export const REC = '5264d2c3-d3b1-411c-829f-90e61165251a';
 export const KEY = 'z6MkpdLK5QZdFDyZbnZGSUrKnRta68KEfoBwNbjS3fNmV9qc';
 export const ACCESS_TOKEN = 'test-access-token';
 export const PUBLIC = 'https://example.test/openrwp';
+export const TYPE_DEFAULT = 'did:rwp:4d3c45e8-1785-4f52-90f7-b9f5811935ad:7819d43a-3bd7-4cb0-bff6-b2e61044a3af';
 
 export const newKeyPem = () => generateKeyPairSync('ed25519').privateKey.export({ format: 'pem', type: 'pkcs8' });
 
 // In-memory store with the same interface as store.js.
 export class FakeStore {
   constructor() {
-    this.namespaces = new Map([[NS, { namespace: NS, authorPublicKey: KEY, status: 'active' }]]);
+    this.namespaces = new Map([[NS, { namespace: NS, authorPublicKey: KEY, status: 'active', agentRecordId: null }]]);
     this.records = new Map();
+    this.metadata = new Map();
     this.devices = new Map();
     this.tokens = new Map();
     this.jtis = new Set();
@@ -44,11 +46,12 @@ export class FakeStore {
   async getVersion(ns, rec, hash) {
     return this.records.get(`${ns}/${rec}`)?.versions.find((v) => v.versionHash === hash) ?? null;
   }
-  async insertVersion(ns, rec, version, stored) {
+  async insertVersion(ns, rec, version, stored, initialMetadata) {
     const key = `${ns}/${rec}`;
     if (!this.records.has(key)) {
       const now = new Date().toISOString();
       this.records.set(key, { createdAt: now, updatedAt: now, versions: [] });
+      if (initialMetadata) this.metadata.set(key, structuredClone(initialMetadata));
     }
     const r = this.records.get(key);
     if (r.versions.some((v) => v.versionHash === version.versionHash)) return 'exists';
@@ -63,14 +66,8 @@ export class FakeStore {
     r.updatedAt = new Date().toISOString();
     return 'created';
   }
-  async currentVersion(ns, rec) {
-    const r = this.records.get(`${ns}/${rec}`);
-    if (!r) return null;
-    const parents = new Set(r.versions.flatMap((v) => v.parents));
-    const heads = r.versions.map((v, i) => ({ v, i })).filter(({ v }) => !parents.has(v.versionHash));
-    heads.sort((a, b) => Date.parse(b.v.createdAtRaw) - Date.parse(a.v.createdAtRaw) || b.i - a.i);
-    return heads[0]?.v.versionHash ?? null;
-  }
+  async getMetadata(ns, rec) { return this.metadata.get(`${ns}/${rec}`) ?? null; }
+  async putMetadata(ns, rec, metadata) { this.metadata.set(`${ns}/${rec}`, structuredClone(metadata)); }
   async getTokenDevice(tokenHash) {
     const t = this.tokens.get(tokenHash);
     if (!t || t.expiresAt <= Date.now()) return null;
@@ -140,7 +137,9 @@ export async function startServer(overrides = {}) {
   store.tokens.set(sha256Hex(ACCESS_TOKEN), { deviceId: 1, expiresAt: Date.now() + 600_000 });
 
   const blobs = createBlobStore(await mkdtemp(join(tmpdir(), 'openrwp-')));
-  const config = { publicBaseUrl: PUBLIC, maxBodyBytes: 1024 * 1024, ...overrides };
+  const config = {
+    publicBaseUrl: PUBLIC, maxBodyBytes: 1024 * 1024, recordTypeDefault: TYPE_DEFAULT, ...overrides,
+  };
   const server = http.createServer(createApp({ store, blobs, config }));
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -165,3 +164,4 @@ export async function startServer(overrides = {}) {
 
 export const versionsPath = (ns = NS, rec = REC) => `/records/${ns}/${rec}/versions`;
 export const settingsPath = (ns = NS, rec = REC) => `/records/${ns}/${rec}/settings`;
+export const recordPath = (ns = NS, rec = REC) => `/records/${ns}/${rec}`;

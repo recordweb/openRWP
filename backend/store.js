@@ -11,11 +11,17 @@ export function createStore(pool) {
 
     async getNamespace(ns) {
       const { rows } = await pool.query(
-        'SELECT namespace, author_public_key, status FROM openrwp.namespaces WHERE namespace = $1',
+        `SELECT namespace, author_public_key, status, agent_record_id
+           FROM openrwp.namespaces WHERE namespace = $1`,
         [ns],
       );
       if (rows.length === 0) return null;
-      return { namespace: rows[0].namespace, authorPublicKey: rows[0].author_public_key, status: rows[0].status };
+      return {
+        namespace: rows[0].namespace,
+        authorPublicKey: rows[0].author_public_key,
+        status: rows[0].status,
+        agentRecordId: rows[0].agent_record_id,
+      };
     },
 
     async getRecord(ns, rec) {
@@ -132,7 +138,8 @@ export function createStore(pool) {
     },
 
     // Creates the record if needed and stores one version. Returns 'created' or 'exists'.
-    async insertVersion(ns, rec, version, stored) {
+    // initialMetadata is stored only when the record is created.
+    async insertVersion(ns, rec, version, stored, initialMetadata) {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
@@ -141,6 +148,13 @@ export function createStore(pool) {
            ON CONFLICT (namespace, record_id) DO UPDATE SET updated_at = NOW()`,
           key(ns, rec),
         );
+        if (initialMetadata) {
+          await client.query(
+            `INSERT INTO openrwp.record_metadata (namespace, record_id, metadata) VALUES ($1, $2, $3)
+             ON CONFLICT (namespace, record_id) DO NOTHING`,
+            [ns, rec, initialMetadata],
+          );
+        }
         const inserted = await client.query(
           `INSERT INTO openrwp.versions
              (namespace, record_id, version_hash, state, created_at_raw, modified_at_raw,
@@ -185,6 +199,24 @@ export function createStore(pool) {
       } finally {
         client.release();
       }
+    },
+
+    // Metadata of a record, or null if none is stored yet.
+    async getMetadata(ns, rec) {
+      const { rows } = await pool.query(
+        'SELECT metadata FROM openrwp.record_metadata WHERE namespace = $1 AND record_id = $2',
+        key(ns, rec),
+      );
+      return rows.length > 0 ? rows[0].metadata : null;
+    },
+
+    async putMetadata(ns, rec, metadata) {
+      await pool.query(
+        `INSERT INTO openrwp.record_metadata (namespace, record_id, metadata) VALUES ($1, $2, $3)
+         ON CONFLICT (namespace, record_id)
+         DO UPDATE SET metadata = EXCLUDED.metadata, updated_at = NOW()`,
+        [ns, rec, metadata],
+      );
     },
 
     // Option A: the head with the newest createdAt (informational only, RWP 4.3 currentVersion).

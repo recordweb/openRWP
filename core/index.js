@@ -8,3 +8,4 @@ export * from './src/version.js';
 export * from './src/graph.js';
 export * from './src/keys.js';
 export * from './src/dpop.js';
+export * from './src/record.js';

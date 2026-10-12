@@ -41,7 +41,7 @@ test('append, read, content and resolver for a root version', async (t) => {
   assert.equal(resolved.headers.get('content-type'), 'application/did+ld+json');
   const doc = await resolved.json();
   assert.equal(doc.id, did);
-  assert.equal(doc.currentVersion, v.versionHash);
+  assert.equal(doc.currentVersion, '');
   assert.equal(doc.controller, did);
   assert.equal(doc.recordEndpoint, `https://example.test/openrwp/records/${NS}/${REC}`);
   assert.deepEqual(doc.verificationMethod, [{
@@ -52,7 +52,7 @@ test('append, read, content and resolver for a root version', async (t) => {
   assert.equal(withHash.status, 200);
 });
 
-test('children, branches and currentVersion (newest head)', async (t) => {
+test('children and branches: the DID document keeps currentVersion empty (drafts only)', async (t) => {
   const s = await startServer(); t.after(s.close);
   const root = makeVersion({ content: 'v1', createdAt: '2026-10-10T13:00:00Z' });
   const child = makeVersion({ content: 'v2', parents: [root.versionHash], createdAt: '2026-10-10T14:00:00Z' });
@@ -61,7 +61,7 @@ test('children, branches and currentVersion (newest head)', async (t) => {
     assert.equal((await s.request(versionsPath(), { method: 'POST', body: v })).status, 201);
   }
   const doc = await (await s.request(`/did/${makeDid(NS, REC)}`, { token: null })).json();
-  assert.equal(doc.currentVersion, branch.versionHash);
+  assert.equal(doc.currentVersion, '');
 });
 
 test('structural rules: unknown parent, second root, unknown record parent', async (t) => {

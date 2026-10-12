@@ -6,8 +6,9 @@ import { buildDidDocument } from './didDocument.js';
 import { createTokenHandler } from './token.js';
 import { createVersionReader } from './versionReader.js';
 import { createLinks } from './links.js';
-import { HttpError, sendJson, readJsonBody } from './http.js';
+import { createRecords } from './records.js';
 import { createDocsHandler } from './docs.js';
+import { HttpError, sendJson, readJsonBody } from './http.js';
 
 // Structurally valid requests that the custodian does not accept (Binding 6.2: 422).
 const UNPROCESSABLE = new Set([
@@ -36,6 +37,7 @@ export function createApp({ store, blobs, config }) {
   const handleToken = createTokenHandler({ store, config });
   const reader = createVersionReader({ store, blobs });
   const links = createLinks({ store, reader, config });
+  const records = createRecords({ store, reader, config });
   const docs = createDocsHandler({ config });
 
   // DPoP-bound access token (RFC 9449 section 7): "Authorization: DPoP <token>" plus a "DPoP" proof.
@@ -100,13 +102,15 @@ export function createApp({ store, blobs, config }) {
     const namespace = await store.getNamespace(ns);
     const record = namespace ? await store.getRecord(ns, rec) : null;
     if (!record) throw new HttpError(404, 'unknown-did');
-    const currentVersion = await store.currentVersion(ns, rec);
+    const recordDid = makeDid(ns, rec);
+    // Controller: the AgentRecord of the namespace owner; without one the Record DID itself.
+    const controller = namespace.agentRecordId ? makeDid(ns, namespace.agentRecordId) : recordDid;
     const doc = buildDidDocument({
-      did: makeDid(ns, rec),
+      did: recordDid,
       publicBaseUrl: config.publicBaseUrl,
       namespace,
       record,
-      currentVersion,
+      controller,
     });
     sendJson(res, 200, doc, { 'Content-Type': 'application/did+ld+json', 'Cache-Control': 'no-cache' });
   }
@@ -144,7 +148,9 @@ export function createApp({ store, blobs, config }) {
 
     const stored = [];
     for (const bytes of fileBytes) stored.push(await blobs.put(bytes));
-    const outcome = await store.insertVersion(ns, rec, body, stored);
+    // A new record gets its initial metadata in the same transaction (ignored if the record exists).
+    const initialMetadata = records.initialMetadata(await store.getNamespace(ns));
+    const outcome = await store.insertVersion(ns, rec, body, stored, initialMetadata);
     sendJson(res, outcome === 'created' ? 201 : 200, result, headers);
   }
 
@@ -185,6 +191,21 @@ export function createApp({ store, blobs, config }) {
     }
     if (seg[0] === 'c' && seg.length >= 2) {
       return links.handleCapability(req, res, seg);
+    }
+    if (seg[0] === 'records' && seg.length === 3) {
+      const [, ns, rec] = seg;
+      only('GET');
+      await authorizeRecordRoute(req, ns, rec);
+      return records.getRecord(res, ns, rec, links.settingsLinkHeader(ns, rec));
+    }
+    if (seg[0] === 'records' && seg.length === 4 && seg[3] === 'metadata') {
+      const [, ns, rec] = seg;
+      only('GET', 'PUT');
+      await authorizeRecordRoute(req, ns, rec);
+      const headers = links.settingsLinkHeader(ns, rec);
+      return method === 'GET'
+        ? records.getMetadata(res, ns, rec, headers)
+        : records.putMetadata(req, res, ns, rec, headers);
     }
     if (seg[0] === 'records' && seg.length === 4 && seg[3] === 'sync') {
       const [, ns, rec] = seg;

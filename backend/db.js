@@ -155,6 +155,22 @@ const migrations = [
       CREATE INDEX access_links_record_idx ON openrwp.access_links (namespace, record_id);
     `,
   },
+  {
+    id: '005_metadata',
+    sql: `
+      ALTER TABLE openrwp.namespaces ADD COLUMN agent_record_id UUID;
+
+      CREATE TABLE openrwp.record_metadata (
+        namespace UUID NOT NULL,
+        record_id UUID NOT NULL,
+        metadata JSONB NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (namespace, record_id),
+        FOREIGN KEY (namespace, record_id)
+          REFERENCES openrwp.records (namespace, record_id) ON DELETE CASCADE
+      );
+    `,
+  },
 ];
 
 export async function initializeDatabase() {

@@ -5,6 +5,45 @@ const hash = { type: 'string', pattern: '^[0-9a-f]{64}$', description: 'Bare low
 
 const schemas = {
   Hash: hash,
+    Metadata: {
+    type: 'object',
+    required: ['core'],
+    additionalProperties: false,
+    properties: {
+      core: {
+        type: 'object',
+        required: ['recordType'],
+        additionalProperties: false,
+        properties: {
+          recordType: { type: 'string', description: 'DID of the SchemaRecord of the record type (the version is part of the DID).' },
+        },
+      },
+      governance: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          owner: { type: 'string', description: 'AgentRecord DID of the responsible person or unit.' },
+          classification: { type: 'string' },
+          retentionPolicy: { type: 'string', description: 'DID of a retention rule.' },
+          tags: { type: 'array', items: { type: 'string' } },
+        },
+      },
+      extensions: {
+        type: 'array',
+        items: { type: 'object', required: ['type'], properties: { type: { type: 'string', description: 'DID of the defining SchemaRecord or profile.' } } },
+      },
+    },
+  },
+  Record: {
+    type: 'object',
+    description: 'A complete Record (RWP chapter 3).',
+    properties: {
+      did: { type: 'string' },
+      payload: { type: 'array', items: { $ref: '#/components/schemas/Version' }, description: 'Parents before children, then createdAt, then versionHash.' },
+      metadata: { $ref: '#/components/schemas/Metadata' },
+      recordHash: { ...hash, description: 'SHA-256 over JCS({did, payload, metadata}) (RWP 7.2).' },
+    },
+  },
   Representation: {
     type: 'object',
     required: ['format', 'content', 'contentHash', 'primary'],
@@ -183,6 +222,33 @@ export function buildOpenApi(publicBaseUrl = '') {
       { name: 'Settings' }, { name: 'Capability URLs' },
     ],
     paths: {
+      '/records/{ns}/{rec}': {
+        get: {
+          tags: ['Records'], summary: 'Retrieve the complete Record (recordEndpoint)',
+          description: 'The URL announced as recordEndpoint in the DID document. No anonymous access.',
+          security: secured, parameters: record,
+          responses: { 200: { description: 'Record', content: json(ref('Record')) }, ...authErrors, 404: errorResponse('Unknown record') },
+        },
+      },
+      '/records/{ns}/{rec}/metadata': {
+        get: {
+          tags: ['Records'], summary: 'Read the metadata of a record',
+          security: secured, parameters: record,
+          responses: { 200: { description: 'Metadata', content: json(ref('Metadata')) }, ...authErrors, 404: errorResponse('Unknown record') },
+        },
+        put: {
+          tags: ['Records'], summary: 'Replace the metadata of a record',
+          description: 'Metadata is not versioned and changes only the recordHash. core.schemaVersion does not exist; the version is part of recordType.',
+          security: secured, parameters: record,
+          requestBody: { required: true, content: json(ref('Metadata')) },
+          responses: {
+            200: { description: 'New metadata', content: json(ref('Metadata')) },
+            400: errorResponse('Invalid metadata'),
+            ...authErrors,
+            404: errorResponse('Unknown record'),
+          },
+        },
+      },
       '/health': {
         get: {
           tags: ['Public'], summary: 'Health check',

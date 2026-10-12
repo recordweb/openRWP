@@ -9,6 +9,9 @@ import { startServer } from './helpers.js';
 const EXPECTED_ROUTES = [
   'get /health',
   'get /did/{did}',
+  'get /records/{ns}/{rec}',
+  'get /records/{ns}/{rec}/metadata',
+  'put /records/{ns}/{rec}/metadata',
   'post /token',
   'post /records/{ns}/{rec}/versions',
   'get /records/{ns}/{rec}/versions/{hash}',
