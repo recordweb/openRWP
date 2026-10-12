@@ -39,7 +39,7 @@ Status: **E** = entschieden, **O** = offen (Diskussion nötig), **I** = im Demo 
 | A29 | 4.3 | `currentVersion` heisst "Content hash der aktuellen finalisierten Version"; leer bei Entwurf. Unklar, ob `contentHash` oder `versionHash` gemeint ist. `updated` nur bei Änderung des Speicherorts | Präzisieren (Demo: leer, `updated` = `created`) | O, I |
 | A30 | 4.3 | `verificationMethod` darf nach 4.3 nicht geändert werden. Wie ein Schlüsselwechsel oder die Kompromittierung des Autor-Schlüssels abgebildet wird, ist offen | Rotation konzipieren (Demo: Schlüssel unveränderlich) | O, I |
 | A31 | 21.2.4 | Format des Resolver-Eintrags im GNR (Basis-URL mit Endung, Vorlage oder Abfrage) ist mir aus der Spec nicht belegt | Prüfen und festlegen (Demo: `https://vps.recordweb.dev/openrwp/did/`) | O |
-
+| A32 | 5.1 / 7.3 | Die Bedeutung von createdAt und modifiedAt bei Dateien ist nicht festgelegt (Zeitpunkt der Version oder der letzten Dateiänderung) | Semantik definieren. Demo: beide gleich dem Push-Zeitpunkt, Handhabe später                                           | O, I   |
 
 ## B. RWC 0.0.8
 
@@ -83,6 +83,7 @@ Weitere Punkte zum RWC sind bisher nicht aufgefallen, weil der Schwerpunkt bei R
 | C26 | 9, 10.3 | Namespace-Konto und AgentRecord: Wer legt den AgentRecord an und wo liegt er? Im Demo legt die Admin-Funktion ihn im eigenen Namespace der Person an (Name, Mailadresse als JSON); `controller` und `owner` zeigen darauf. Das Binding sollte es beschreiben (Open Issue 3) | O, I |
 | C27 | 5.2, 10.2 | Anmeldung eines Geräts: Im Demo trägt der Admin den öffentlichen Schlüssel in der Admin-Seite ein. Vorschlag für später: Einmal-Code (Enrollment), mit dem sich ein Gerät selbst anmeldet | O |
 | C28 | 4 | `GET {recordEndpoint}` liefert alle Versionen mit Inhalt; bei grossen Records ist die Antwort gross. Optional einen Modus ohne Inhalt vorsehen | O |
+| C29 | 6.2       | Das Binding nennt kein Grössenlimit pro Anfrage. Base64 vergrössert eine Datei um ein Drittel                                      | Limit und Verhalten festlegen. Demo: 25 MB pro Anfrage, der Client prüft vor dem Senden, der Server antwortet mit 413 | O, I   |
 
 
 ## Anhang: Testvektoren (aus der Kernbibliothek, mit unabhängiger Python-Implementierung gegengeprüft)
