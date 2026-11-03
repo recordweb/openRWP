@@ -1,9 +1,9 @@
 {
   "name": "@openrwp/core",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "private": true,
   "type": "module",
   "main": "index.js",
   "engines": { "node": ">=20" },
-  "scripts": { "test": "node --test test/canonical.test.js test/hash.test.js test/multibase.test.js test/keys.test.js test/ids.test.js test/portable.test.js" }
+  "scripts": { "test": "node --test test/canonical.test.js test/hash.test.js test/multibase.test.js test/keys.test.js test/ids.test.js test/graph.test.js test/representation.test.js test/version.test.js test/record.test.js test/proof.test.js test/did-document.test.js test/portable.test.js" }
 }

@@ -3,8 +3,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 // The core must run unchanged in browsers: no Node.js modules, no Buffer.
-// The list grows as modules are migrated to RWP 0.0.12.
-const MIGRATED = ['bytes', 'canonical', 'errors', 'hash', 'ids', 'keys', 'multibase'];
+// dpop.js and encoding.js belong to the RWP 0.0.8 client/server binding and are not part of this list.
+const MIGRATED = [
+  'bytes', 'canonical', 'did-document', 'errors', 'graph', 'hash', 'ids', 'keys',
+  'multibase', 'proof', 'record', 'representation', 'version',
+];
 
 for (const name of MIGRATED) {
   test(`src/${name}.js does not depend on Node.js`, () => {

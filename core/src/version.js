@@ -1,56 +1,63 @@
 import { CoreError } from './errors.js';
 import { canonicalize } from './canonical.js';
-import { sha256Hex } from './hash.js';
-import { isHash } from './ids.js';
+import { sha256Ref, isHashRef } from './hash.js';
 import { validateRepresentation } from './representation.js';
+import { addProof } from './proof.js';
 
-const ALLOWED = new Set([
-  'versionHash', 'state', 'parents', 'createdAt', 'modifiedAt', 'representations', 'signature',
-]);
+const ALLOWED = new Set(['versionHash', 'state', 'parents', 'createdAt', 'modifiedAt', 'representations', 'proof']);
 const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
 
+export const isTimestamp = (s) => typeof s === 'string' && ISO_8601.test(s) && !Number.isNaN(Date.parse(s));
+
+// Timestamp as used in the RecordWeb root records: UTC, seconds precision.
+export const nowIso = (date = new Date()) => date.toISOString().replace(/\.\d{3}Z$/, 'Z');
+
 // RWP 7.3: versionHash = SHA-256(JCS({state, parents, createdAt, modifiedAt, representations})).
-// mode 'full' (default, literal reading of 7.3): complete Representation objects incl. `content`.
-// mode 'withoutContent' (planned RWP change): `content` omitted, `contentHash` still included.
-export function computeVersionHash(version, { mode = 'full' } = {}) {
-  let representations = version.representations;
-  if (mode === 'withoutContent') {
-    representations = representations.map(({ content, ...rest }) => rest);
-  } else if (mode !== 'full') {
-    throw new CoreError('invalid-mode', mode);
-  }
-  return sha256Hex(canonicalize({
+// The representations are complete objects including `content` (finding F-14).
+export async function computeVersionHash(version) {
+  return sha256Ref(canonicalize({
     state: version.state,
     parents: version.parents,
     createdAt: version.createdAt,
     modifiedAt: version.modifiedAt,
-    representations,
+    representations: version.representations,
   }));
 }
 
-const isTimestamp = (s) => typeof s === 'string' && ISO_8601.test(s) && !Number.isNaN(Date.parse(s));
+export async function createVersion({ state = 'draft', parents = [], createdAt = nowIso(), modifiedAt = createdAt, representations }) {
+  const version = { state, parents, createdAt, modifiedAt, representations };
+  return { versionHash: await computeVersionHash(version), ...version };
+}
 
-// Validates a version as sent by a client. Returns the file bytes per representation (same order).
-// `allowedStates` lets the caller restrict states (the demo server accepts only 'draft').
-export function validateVersion(version, { allowedStates = ['draft', 'finalized'], mode = 'full' } = {}) {
+// RWP 7.7: the proof covers the version including its versionHash and is created at modifiedAt.
+export async function signVersion(version, { privateKey, verificationMethod }) {
+  return addProof(version, { privateKey, verificationMethod, created: version.modifiedAt });
+}
+
+// Structural and hash validation of a version as received from a client. Signatures are verified in proof.js.
+export async function validateVersion(version, { allowedStates = ['draft', 'finalized'] } = {}) {
   if (version === null || typeof version !== 'object' || Array.isArray(version)) throw new CoreError('invalid-version');
   for (const key of Object.keys(version)) {
     if (!ALLOWED.has(key)) throw new CoreError('unknown-field', key);
   }
-  if (!isHash(version.versionHash)) throw new CoreError('invalid-hash', 'versionHash');
+  if (!isHashRef(version.versionHash)) throw new CoreError('invalid-hash', 'versionHash');
   if (!allowedStates.includes(version.state)) throw new CoreError('invalid-state', String(version.state));
-  if (!Array.isArray(version.parents) || !version.parents.every(isHash)) throw new CoreError('invalid-parents');
+  if (!Array.isArray(version.parents) || !version.parents.every(isHashRef)) throw new CoreError('invalid-parents');
   if (new Set(version.parents).size !== version.parents.length) throw new CoreError('invalid-parents', 'duplicate');
   if (version.parents.includes(version.versionHash)) throw new CoreError('cycle', 'self-parent');
   if (!isTimestamp(version.createdAt)) throw new CoreError('invalid-timestamp', 'createdAt');
   if (!isTimestamp(version.modifiedAt)) throw new CoreError('invalid-timestamp', 'modifiedAt');
-  if (version.signature !== undefined && typeof version.signature !== 'string') throw new CoreError('invalid-signature');
+  if (version.proof !== undefined
+    && !(Array.isArray(version.proof) && version.proof.length > 0 && version.proof.every((p) => p !== null && typeof p === 'object'))) {
+    throw new CoreError('invalid-proof', 'proof must be a non-empty array');
+  }
   if (!Array.isArray(version.representations) || version.representations.length === 0) {
     throw new CoreError('invalid-representations', 'at least one required');
   }
-  const bytes = version.representations.map(validateRepresentation);
-  const primaries = version.representations.filter((r) => r.primary).length;
-  if (primaries !== 1) throw new CoreError('invalid-representations', 'exactly one primary required');
-  if (computeVersionHash(version, { mode }) !== version.versionHash) throw new CoreError('version-hash-mismatch');
-  return bytes;
+  for (const rep of version.representations) await validateRepresentation(rep);
+  if (version.representations.filter((r) => r.primary).length !== 1) {
+    throw new CoreError('invalid-representations', 'exactly one primary required');
+  }
+  if ((await computeVersionHash(version)) !== version.versionHash) throw new CoreError('version-hash-mismatch');
+  return version;
 }

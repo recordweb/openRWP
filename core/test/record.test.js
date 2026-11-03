@@ -1,94 +1,75 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  computeRecordHash, orderVersions, defaultMetadata, validateMetadata, isRwpDid,
+  computeRecordHash, validateRecord, validateMetadata, defaultMetadata, buildRecord, orderVersions,
+  createVersion, createRepresentation, makeDid,
 } from '../index.js';
+import { rootSchema, rootAgent } from './vectors.js';
 
-const TYPE = 'did:rwp:4d3c45e8-1785-4f52-90f7-b9f5811935ad:7f3a9c52-6b1e-4d08-9a47-2c5e8b1d0f36';
-const OWNER = 'did:rwp:4d3c45e8-1785-4f52-90f7-b9f5811935ad:9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d';
+const OWNER = 'did:rwp:d2d14675-50c9-463d-b564-1ea50644c836:efd09e7b-5f65-4637-b06c-404a9da97f0b';
 
-// Vector computed with an independent implementation (Python, RFC 8785 for this input).
-const VECTOR = {
-  did: 'did:rwp:4d3c45e8-1785-4f52-90f7-b9f5811935ad:5264d2c3-d3b1-411c-829f-90e61165251a',
-  payload: [{
-    state: 'draft',
-    parents: [],
-    createdAt: '2026-10-10T13:00:00Z',
-    modifiedAt: '2026-10-10T13:00:00Z',
-    representations: [{
-      format: 'text/markdown',
-      content: 'c2FtcGxlIHRleHQ=',
-      primary: true,
-      role: 'source',
-      contentHash: 'f222dc6bc4ee1924aef96421bde393ae1c83598c5118db9c9c68f59489154bca',
-    }],
-    versionHash: 'faf54a141b4e54ff72cbbf0baecfa58b72ddaf76b677bb83e2bfd18f2ee7cbe5',
-  }],
-  metadata: { core: { recordType: TYPE }, governance: { owner: OWNER }, extensions: [] },
-};
-const RECORD_HASH = '904e9c9ab6c414ee7d0d75cecfd6d215bf5978bd9cd4b61b35d72ff00e960a1e';
-
-test('recordHash vector', () => {
-  assert.equal(computeRecordHash(VECTOR), RECORD_HASH);
-  const changed = structuredClone(VECTOR);
-  changed.metadata.governance.owner = 'someone-else';
-  assert.notEqual(computeRecordHash(changed), RECORD_HASH);
+test('the recordHash of the root records is reproduced', async () => {
+  for (const record of [rootSchema, rootAgent]) {
+    assert.equal(await computeRecordHash(record), record.recordHash);
+    await validateRecord(record);
+    validateMetadata(record.metadata);
+  }
 });
 
-test('DID syntax check for recordType and friends', () => {
-  assert.ok(isRwpDid(TYPE));
-  assert.ok(isRwpDid(`${TYPE}:${'a'.repeat(64)}`));
-  assert.ok(isRwpDid('did:rwp:example.com:f47ac10b'));
-  assert.ok(!isRwpDid('did:web:example.com'));
-  assert.ok(!isRwpDid('did:rwp:onlyonesegment'));
-  assert.ok(!isRwpDid(`${TYPE} x`));
-  assert.ok(!isRwpDid(undefined));
+test('changed metadata is detected', async () => {
+  const record = structuredClone(rootAgent);
+  record.metadata.governance.classification = 'internal';
+  await assert.rejects(() => validateRecord(record), { code: 'record-hash-mismatch' });
 });
 
-test('orderVersions: parents first, then createdAt, then versionHash', () => {
-  const v = (versionHash, createdAt, ...parents) => ({ versionHash, createdAt, parents });
-  const root = v('a', '2026-10-10T13:00:00Z');
-  const child = v('c', '2026-10-10T12:00:00Z', 'a'); // older clock than its parent
-  const other = v('b', '2026-10-10T14:00:00Z', 'a');
-  const sameTime = v('d', '2026-10-10T14:00:00Z', 'a');
-  const ordered = orderVersions([sameTime, other, child, root]).map((x) => x.versionHash);
-  assert.deepEqual(ordered, ['a', 'c', 'b', 'd']);
-  assert.deepEqual(orderVersions([root]).map((x) => x.versionHash), ['a']);
-  assert.throws(() => orderVersions([v('x', '2026-10-10T13:00:00Z', 'y'), v('y', '2026-10-10T13:00:00Z', 'x')]), { code: 'cycle' });
+test('transit incoming requires a provenanceRef, other values forbid it', () => {
+  const base = defaultMetadata({ recordType: rootAgent.did, schemaVersion: rootAgent.payload[0].versionHash, owner: OWNER });
+  const incoming = structuredClone(base);
+  incoming.core.transit = 'incoming';
+  assert.throws(() => validateMetadata(incoming), { code: 'invalid-metadata' });
+  incoming.core.provenanceRef = { sourceDescription: 'mail', capturedAt: '2026-11-03T12:00:00Z', capturedBy: 'reception' };
+  validateMetadata(incoming);
+  const internal = structuredClone(base);
+  internal.core.provenanceRef = incoming.core.provenanceRef;
+  assert.throws(() => validateMetadata(internal), { code: 'invalid-metadata' });
 });
 
-test('defaultMetadata shape', () => {
-  assert.deepEqual(defaultMetadata({ recordType: TYPE }), { core: { recordType: TYPE }, extensions: [] });
-  assert.deepEqual(defaultMetadata({ recordType: TYPE, owner: OWNER }), {
-    core: { recordType: TYPE }, governance: { owner: OWNER }, extensions: [],
-  });
+test('metadata rules', () => {
+  const base = defaultMetadata({ recordType: rootAgent.did, schemaVersion: rootAgent.payload[0].versionHash });
+  validateMetadata(base);
+  assert.throws(() => validateMetadata({ ...base, extra: 1 }), { code: 'unknown-field' });
+  assert.throws(() => validateMetadata({ ...base, core: { ...base.core, transit: 'sideways' } }), { code: 'invalid-metadata' });
+  assert.throws(() => validateMetadata({ ...base, core: { ...base.core, schemaVersion: 'abc' } }), { code: 'invalid-metadata' });
+  assert.throws(() => validateMetadata({ ...base, governance: { owner: 'somebody' } }), { code: 'invalid-metadata' });
+  assert.throws(() => validateMetadata({ ...base, extensions: [{ type: 'x' }] }), { code: 'invalid-metadata' });
+  validateMetadata({ ...base, extensions: [{ type: rootAgent.did, namespaces: [] }] });
 });
 
-test('validateMetadata accepts valid metadata', () => {
-  const full = {
-    core: { recordType: TYPE },
-    governance: { owner: 'mailto:sam.doe@example.com', classification: 'internal', retentionPolicy: 'did:rwp:bern.ch:retention', tags: ['a', 'b'] },
-    extensions: [{ type: 'did:rwp:bern.ch:ext', anything: 1 }],
-  };
-  assert.equal(validateMetadata(full), full);
-  assert.ok(validateMetadata({ core: { recordType: TYPE } }));
+test('buildRecord assembles did, metadata, payload and recordHash', async () => {
+  const did = makeDid('example', 'note-1');
+  const metadata = defaultMetadata({ recordType: rootAgent.did, schemaVersion: rootAgent.payload[0].versionHash, owner: OWNER });
+  const first = await createVersion({ state: 'finalized', createdAt: '2026-11-03T12:00:00Z', representations: [await createRepresentation({ format: 'text/markdown', content: 'v1' })] });
+  const second = await createVersion({ parents: [first.versionHash], createdAt: '2026-11-03T12:05:00Z', representations: [await createRepresentation({ format: 'text/markdown', content: 'v2' })] });
+  const record = await buildRecord({ did, metadata, payload: [second, first] });
+  assert.deepEqual(Object.keys(record), ['did', 'metadata', 'payload', 'recordHash']);
+  assert.deepEqual(record.payload.map((v) => v.versionHash), [first.versionHash, second.versionHash]);
+  await validateRecord(record);
 });
 
-test('validateMetadata rejects invalid metadata', () => {
-  const bad = (m, code) => assert.throws(() => validateMetadata(m), { code });
-  bad(null, 'invalid-metadata');
-  bad([], 'invalid-metadata');
-  bad({}, 'invalid-metadata');
-  bad({ core: {} }, 'invalid-metadata');
-  bad({ core: { recordType: 'not a did' } }, 'invalid-metadata');
-  bad({ core: { recordType: TYPE, schemaVersion: 'a'.repeat(64) } }, 'unknown-field');
-  bad({ core: { recordType: TYPE }, other: 1 }, 'unknown-field');
-  bad({ core: { recordType: TYPE }, governance: { owner: '' } }, 'invalid-metadata');
-  bad({ core: { recordType: TYPE }, governance: { tags: 'x' } }, 'invalid-metadata');
-  bad({ core: { recordType: TYPE }, governance: { tags: [1] } }, 'invalid-metadata');
-  bad({ core: { recordType: TYPE }, governance: { retentionPolicy: 'x' } }, 'invalid-metadata');
-  bad({ core: { recordType: TYPE }, governance: { unknown: 1 } }, 'unknown-field');
-  bad({ core: { recordType: TYPE }, extensions: {} }, 'invalid-metadata');
-  bad({ core: { recordType: TYPE }, extensions: [{}] }, 'invalid-metadata');
-  bad({ core: { recordType: TYPE }, extensions: [{ type: 'x' }] }, 'invalid-metadata');
+test('a record without payload is valid', async () => {
+  const metadata = defaultMetadata({ recordType: rootAgent.did, schemaVersion: rootAgent.payload[0].versionHash });
+  const record = await buildRecord({ did: makeDid('example', 'agent-1'), metadata });
+  assert.equal('payload' in record, false);
+  await validateRecord(record);
+});
+
+test('unknown parents and cycles are rejected', async () => {
+  const metadata = defaultMetadata({ recordType: rootAgent.did, schemaVersion: rootAgent.payload[0].versionHash });
+  const rep = await createRepresentation({ format: 'text/markdown', content: 'x' });
+  const orphan = await createVersion({ parents: [`sha256:${'a'.repeat(64)}`], representations: [rep] });
+  const record = await buildRecord({ did: makeDid('example', 'note-2'), metadata, payload: [orphan] });
+  await assert.rejects(() => validateRecord(record), { code: 'unknown-parent' });
+  const a = { versionHash: 'a', parents: ['b'], createdAt: '2026-01-01T00:00:00Z' };
+  const b = { versionHash: 'b', parents: ['a'], createdAt: '2026-01-01T00:00:00Z' };
+  assert.throws(() => orderVersions([a, b]), { code: 'cycle' });
 });
