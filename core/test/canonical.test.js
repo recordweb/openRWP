@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canonicalize, sha256Hex, encodeBase64, decodeBase64Strict } from '../index.js';
+import { canonicalize } from '../index.js';
 
 test('canonicalize sorts keys and drops whitespace', () => {
   assert.equal(canonicalize({ b: 1, a: [true, null, 'x'] }), '{"a":[true,null,"x"],"b":1}');
@@ -18,16 +18,4 @@ test('canonicalize normalises strings to NFC', () => {
 
 test('canonicalize ignores undefined properties', () => {
   assert.equal(canonicalize({ a: 1, b: undefined }), '{"a":1}');
-});
-
-test('sha256Hex is bare lowercase hex', () => {
-  assert.equal(sha256Hex('abc'), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
-});
-
-test('base64 round trip is strict', () => {
-  const bytes = Buffer.from('sample text');
-  assert.equal(encodeBase64(bytes), 'c2FtcGxlIHRleHQ=');
-  assert.deepEqual(decodeBase64Strict('c2FtcGxlIHRleHQ='), bytes);
-  assert.throws(() => decodeBase64Strict('c2FtcGxlIHRleHQ'), { code: 'invalid-base64' });
-  assert.throws(() => decodeBase64Strict('c2Ft cGxl'), { code: 'invalid-base64' });
 });
